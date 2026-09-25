@@ -1,0 +1,873 @@
+//! Name resolution, a deliberately closed type/effect system, and handler lowering.
+use crate::syntax::*;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ty {
+    Named(String),
+    Option(Box<Ty>),
+    Result(Box<Ty>, Box<Ty>),
+    List(Box<Ty>),
+    Rows(String),
+    Request(String),
+    Temporal,
+    Never,
+}
+impl Ty {
+    fn named(n: &str) -> Self {
+        Self::Named(n.into())
+    }
+    fn merge(&self, other: &Self) -> Option<Self> {
+        match (self, other) {
+            (Self::Never, t) | (t, Self::Never) => Some(t.clone()),
+            (Self::Option(a), Self::Option(b)) => Some(Self::Option(Box::new(a.merge(b)?))),
+            (Self::List(a), Self::List(b)) => Some(Self::List(Box::new(a.merge(b)?))),
+            (Self::Result(a, b), Self::Result(c, d)) => {
+                Some(Self::Result(Box::new(a.merge(c)?), Box::new(b.merge(d)?)))
+            }
+            _ if self == other => Some(self.clone()),
+            _ => None,
+        }
+    }
+    fn compatible(&self, other: &Self) -> bool {
+        self.merge(other).is_some()
+    }
+}
+#[derive(Clone, Debug)]
+pub struct Constructor {
+    pub ty: String,
+    pub payload: Vec<Type>,
+    pub fields: BTreeMap<String, Type>,
+}
+#[derive(Clone, Debug)]
+pub enum Instruction {
+    End,
+    Let {
+        name: String,
+        value: Expr,
+        next: usize,
+    },
+    Eval {
+        value: Expr,
+        next: usize,
+    },
+    Match {
+        value: Expr,
+        arms: Vec<(Pattern, usize)>,
+    },
+}
+#[derive(Clone, Debug)]
+pub struct Code {
+    pub instruction: Instruction,
+    pub span: Span,
+}
+#[derive(Clone, Debug)]
+pub struct Program {
+    pub model: Model,
+    pub check: Check,
+    pub constructors: BTreeMap<String, Constructor>,
+    pub aliases: BTreeMap<String, String>,
+    pub tables: BTreeMap<String, Table>,
+    pub handlers: BTreeMap<String, Handler>,
+    pub code: Vec<Code>,
+    pub entries: BTreeMap<String, usize>,
+}
+impl Program {
+    pub fn build(model: Model, selected: Option<&str>) -> Result<Self> {
+        if model.claims.is_empty() {
+            return Err(Error::new(
+                Span::default(),
+                "model needs at least one invariant, property, or cover",
+            ));
+        }
+        let check = if let Some(n) = selected {
+            model
+                .checks
+                .iter()
+                .find(|c| c.name == n)
+                .ok_or_else(|| Error::new(Span::default(), format!("unknown check `{n}`")))?
+        } else if model.checks.len() == 1 {
+            &model.checks[0]
+        } else {
+            return Err(Error::new(
+                Span::default(),
+                "select one check with --check (exactly one required without selection)",
+            ));
+        }
+        .clone();
+        if check.semantics != "cf-core-v0" {
+            return Err(Error::new(
+                check.span,
+                "unsupported semantics; expected \"cf-core-v0\"",
+            ));
+        }
+        let mut p = Self {
+            model,
+            check,
+            constructors: BTreeMap::new(),
+            aliases: BTreeMap::new(),
+            tables: BTreeMap::new(),
+            handlers: BTreeMap::new(),
+            code: vec![],
+            entries: BTreeMap::new(),
+        };
+        let mut type_names = BTreeSet::from([
+            "Bool".to_owned(),
+            "Int".to_owned(),
+            "String".to_owned(),
+            "unit".to_owned(),
+            "DataError".to_owned(),
+        ]);
+        for d in &p.model.types {
+            if !type_names.insert(d.name.clone()) {
+                return Err(Error::new(d.span, "duplicate or reserved type name"));
+            }
+        }
+        for t in &p.model.tables {
+            if !type_names.insert(t.name.clone())
+                || p.tables.insert(t.path.clone(), t.clone()).is_some()
+            {
+                return Err(Error::new(t.span, "duplicate table/type name"));
+            }
+        }
+        for d in &p.model.types {
+            if d.variants.len() == 1
+                && d.variants[0].payload.is_empty()
+                && d.variants[0].fields.is_empty()
+                && d.variants[0].name != d.name
+                && type_names.contains(&d.variants[0].name)
+            {
+                p.aliases.insert(d.name.clone(), d.variants[0].name.clone());
+                continue;
+            }
+            for v in &d.variants {
+                if [
+                    "None",
+                    "Some",
+                    "Ok",
+                    "Err",
+                    "ConstraintViolation",
+                    "MissingRow",
+                ]
+                .contains(&v.name.as_str())
+                    || p.constructors
+                        .insert(
+                            v.name.clone(),
+                            Constructor {
+                                ty: d.name.clone(),
+                                payload: v.payload.clone(),
+                                fields: v.fields.clone(),
+                            },
+                        )
+                        .is_some()
+                {
+                    return Err(Error::new(d.span, "duplicate or reserved constructor"));
+                }
+            }
+        }
+        for t in p.tables.values() {
+            if t.fields.values().filter(|f| f.primary).count() != 1 {
+                return Err(Error::new(t.span, "table requires exactly one primary_key"));
+            }
+            if p.constructors
+                .insert(
+                    t.name.clone(),
+                    Constructor {
+                        ty: t.name.clone(),
+                        payload: vec![],
+                        fields: t
+                            .fields
+                            .iter()
+                            .map(|(n, f)| (n.clone(), f.ty.clone()))
+                            .collect(),
+                    },
+                )
+                .is_some()
+            {
+                return Err(Error::new(t.span, "duplicate table constructor"));
+            }
+        }
+        for n in ["ConstraintViolation", "MissingRow"] {
+            p.constructors.insert(
+                n.into(),
+                Constructor {
+                    ty: "DataError".into(),
+                    payload: vec![],
+                    fields: BTreeMap::new(),
+                },
+            );
+        }
+        for d in &p.model.types {
+            p.resolve(&Type::named(&d.name), d.span)?;
+        }
+        for c in p.constructors.values() {
+            for t in c.payload.iter().chain(c.fields.values()) {
+                p.resolve(t, Span::default())?;
+            }
+        }
+        for t in p.tables.values() {
+            for f in t.fields.values() {
+                let ty = p.resolve(&f.ty, t.span)?;
+                if f.primary && matches!(ty, Ty::Option(_)) {
+                    return Err(Error::new(t.span, "primary key cannot be optional"));
+                }
+            }
+        }
+        for h in &p.model.handlers {
+            if p.handlers.insert(h.path.clone(), h.clone()).is_some() {
+                return Err(Error::new(h.span, "duplicate handler"));
+            }
+        }
+        let mut names = BTreeSet::new();
+        for c in &p.model.claims {
+            if !names.insert(c.name.clone()) {
+                return Err(Error::new(c.span, "claim names must be unique"));
+            }
+        }
+        names.clear();
+        for c in &p.model.checks {
+            if !names.insert(c.name.clone()) {
+                return Err(Error::new(c.span, "check names must be unique"));
+            }
+        }
+        let env = BTreeMap::new();
+        for (domain, xs) in &p.check.domains {
+            if !["Int", "String"].contains(&domain.as_str()) {
+                return Err(Error::new(
+                    p.check.span,
+                    "only Int and String need explicit domains; variants are closed",
+                ));
+            }
+            if xs.len() > 1025 {
+                return Err(Error::new(p.check.span, "domain exceeds 1025 values"));
+            }
+            for x in xs {
+                let actual = p.type_expr(x, &env, None, false, false)?;
+                p.require(&Ty::named(domain), &actual, x.span)?;
+            }
+        }
+        for (path, xs) in &p.check.init {
+            let t = p
+                .tables
+                .get(path)
+                .ok_or_else(|| Error::new(p.check.span, format!("unknown table `{path}`")))?;
+            for x in xs {
+                let actual = p.type_expr(x, &env, None, false, false)?;
+                p.require(&Ty::named(&t.name), &actual, x.span)?;
+            }
+        }
+        for i in &p.check.inputs {
+            let h = p
+                .handlers
+                .get(&i.handler)
+                .ok_or_else(|| Error::new(i.span, "unknown input handler"))?;
+            let actual = p.type_expr(&i.value, &env, None, false, false)?;
+            p.require(&p.resolve(&h.input, h.span)?, &actual, i.span)?;
+        }
+        for h in p.handlers.values() {
+            let input = p.resolve(&h.input, h.span)?;
+            let output = p.resolve(&h.output, h.span)?;
+            let mut env = BTreeMap::from([(h.param.clone(), input)]);
+            let terminal = p.type_block(&h.body, &mut env, &output)?;
+            if !terminal && output != Ty::named("unit") {
+                return Err(Error::new(
+                    h.span,
+                    "non-unit request handler must respond on every branch",
+                ));
+            }
+        }
+        for c in &p.model.claims {
+            let actual = p.type_expr(&c.body, &env, None, true, false)?;
+            if c.kind == ClaimKind::Property {
+                if actual != Ty::Temporal {
+                    return Err(Error::new(
+                        c.span,
+                        "property requires a temporal operator; use invariant for state predicates",
+                    ));
+                }
+                validate_temporal(&c.body)?;
+            } else {
+                p.require(&Ty::named("Bool"), &actual, c.span)?;
+            }
+        }
+        let handlers: Vec<_> = p.handlers.values().cloned().collect();
+        for h in handlers {
+            let end = p.push(Instruction::End, h.span);
+            let entry = p.lower(&h.body, end);
+            p.entries.insert(h.path, entry);
+        }
+        Ok(p)
+    }
+    pub fn resolve(&self, t: &Type, span: Span) -> Result<Ty> {
+        if t.name == "Option" && t.args.len() == 1 {
+            return Ok(Ty::Option(Box::new(self.resolve(&t.args[0], span)?)));
+        }
+        if t.name == "Result" && t.args.len() == 2 {
+            return Ok(Ty::Result(
+                Box::new(self.resolve(&t.args[0], span)?),
+                Box::new(self.resolve(&t.args[1], span)?),
+            ));
+        }
+        if !t.args.is_empty() {
+            return Err(Error::new(span, "unsupported generic type"));
+        }
+        let mut n = t.name.clone();
+        let mut seen = BTreeSet::new();
+        while let Some(a) = self.aliases.get(&n) {
+            if !seen.insert(n.clone()) {
+                return Err(Error::new(span, "cyclic type alias"));
+            }
+            n = a.clone();
+        }
+        if ["Bool", "Int", "String", "unit", "DataError"].contains(&n.as_str())
+            || self.model.types.iter().any(|d| d.name == n)
+            || self.tables.values().any(|t| t.name == n)
+        {
+            Ok(Ty::Named(n))
+        } else {
+            Err(Error::new(span, format!("unknown type `{n}`")))
+        }
+    }
+    fn require(&self, expected: &Ty, actual: &Ty, span: Span) -> Result<()> {
+        if expected.compatible(actual) {
+            Ok(())
+        } else {
+            Err(Error::new(
+                span,
+                format!("type mismatch: expected {expected:?}, found {actual:?}"),
+            ))
+        }
+    }
+    fn type_block(
+        &self,
+        body: &[Stmt],
+        env: &mut BTreeMap<String, Ty>,
+        output: &Ty,
+    ) -> Result<bool> {
+        let mut terminal = false;
+        for (index, s) in body.iter().enumerate() {
+            if terminal {
+                return Err(Error::new(s.span, "unreachable statement after response"));
+            }
+            match &s.kind {
+                StmtKind::Let(n, e) => {
+                    let t = self.type_expr(e, env, Some(output), false, true)?;
+                    if t == Ty::Never {
+                        return Err(Error::new(e.span, "respond cannot be bound to a local"));
+                    }
+                    if matches!(t, Ty::Result(..)) {
+                        let handled = body.get(index + 1).is_some_and(|next| matches!(
+                            &next.kind,
+                            StmtKind::Match(Expr { kind: ExprKind::Name(bound), .. }, _) if bound == n
+                        ));
+                        if !handled {
+                            return Err(Error::new(
+                                s.span,
+                                "a Result binding must be matched immediately in this language slice",
+                            ));
+                        }
+                    }
+                    if env.insert(n.clone(), t).is_some() {
+                        return Err(Error::new(s.span, "local shadowing is not supported"));
+                    }
+                }
+                StmtKind::Expr(e) => {
+                    let t = self.type_expr(e, env, Some(output), false, true)?;
+                    if matches!(t, Ty::Result(..)) {
+                        return Err(Error::new(
+                            e.span,
+                            "handle the Result of this operation with match",
+                        ));
+                    }
+                    terminal = t == Ty::Never;
+                }
+                StmtKind::Match(e, arms) => {
+                    let ty = self.type_expr(e, env, Some(output), false, false)?;
+                    if matches!(ty, Ty::Result(..))
+                        && arms
+                            .iter()
+                            .any(|(p, _)| !matches!(p, Pattern::Variant(_, _)))
+                    {
+                        return Err(Error::new(
+                            e.span,
+                            "match Result explicitly with Ok and Err arms",
+                        ));
+                    }
+                    let mut covered = BTreeSet::new();
+                    let mut wildcard = false;
+                    terminal = !arms.is_empty();
+                    for (pat, statements) in arms {
+                        if wildcard {
+                            return Err(Error::new(s.span, "unreachable match arm"));
+                        }
+                        let mut inner = env.clone();
+                        self.pattern_types(pat, &ty, &mut inner, s.span)?;
+                        match pat {
+                            Pattern::Wild | Pattern::Bind(_) => wildcard = true,
+                            Pattern::Variant(n, _) => {
+                                if !covered.insert(n.clone()) {
+                                    return Err(Error::new(s.span, "duplicate match arm"));
+                                }
+                            }
+                        }
+                        terminal &= self.type_block(statements, &mut inner, output)?;
+                    }
+                    let cases: BTreeSet<_> = match &ty {
+                        Ty::Option(_) => ["None".into(), "Some".into()].into(),
+                        Ty::Result(..) => ["Ok".into(), "Err".into()].into(),
+                        Ty::Named(n) => self
+                            .constructors
+                            .iter()
+                            .filter(|(_, c)| &c.ty == n)
+                            .map(|(k, _)| k.clone())
+                            .collect(),
+                        _ => BTreeSet::new(),
+                    };
+                    if !wildcard && (cases.is_empty() || cases != covered) {
+                        return Err(Error::new(s.span, "non-exhaustive match"));
+                    }
+                }
+            }
+        }
+        Ok(terminal)
+    }
+    fn pattern_types(
+        &self,
+        p: &Pattern,
+        ty: &Ty,
+        env: &mut BTreeMap<String, Ty>,
+        span: Span,
+    ) -> Result<()> {
+        match p {
+            Pattern::Wild => Ok(()),
+            Pattern::Bind(n) => {
+                if env.insert(n.clone(), ty.clone()).is_some() {
+                    Err(Error::new(span, "pattern binding shadows another variable"))
+                } else {
+                    Ok(())
+                }
+            }
+            Pattern::Variant(n, ps) => {
+                let args = match (n.as_str(), ty) {
+                    ("None", Ty::Option(_)) => vec![],
+                    ("Some", Ty::Option(t)) => vec![*t.clone()],
+                    ("Ok", Ty::Result(t, _)) => vec![*t.clone()],
+                    ("Err", Ty::Result(_, t)) => vec![*t.clone()],
+                    _ => {
+                        let c = self
+                            .constructors
+                            .get(n)
+                            .ok_or_else(|| Error::new(span, "unknown pattern constructor"))?;
+                        self.require(&Ty::named(&c.ty), ty, span)?;
+                        if !c.fields.is_empty() {
+                            return Err(Error::new(
+                                span,
+                                "record constructor patterns are not supported yet; bind the record instead",
+                            ));
+                        }
+                        c.payload
+                            .iter()
+                            .map(|t| self.resolve(t, span))
+                            .collect::<Result<Vec<_>>>()?
+                    }
+                };
+                if args.len() != ps.len() {
+                    return Err(Error::new(span, "pattern arity mismatch"));
+                }
+                for (p, t) in ps.iter().zip(args.iter()) {
+                    if matches!(p, Pattern::Variant(..)) {
+                        return Err(Error::new(
+                            span,
+                            "nested constructor patterns are not supported yet; match the bound payload separately",
+                        ));
+                    }
+                    self.pattern_types(p, t, env, span)?;
+                }
+                Ok(())
+            }
+        }
+    }
+    pub fn type_expr(
+        &self,
+        e: &Expr,
+        env: &BTreeMap<String, Ty>,
+        output: Option<&Ty>,
+        property: bool,
+        effect: bool,
+    ) -> Result<Ty> {
+        let pure = |e: &Expr| self.type_expr(e, env, output, property, false);
+        let boolty = Ty::named("Bool");
+        if let Some(path) = e.path()
+            && property
+            && path.ends_with(".rows")
+        {
+            let t = path.trim_end_matches(".rows");
+            if self.tables.contains_key(t) {
+                return Ok(Ty::Rows(t.into()));
+            }
+        }
+        match &e.kind {
+            ExprKind::Bool(_) => Ok(boolty),
+            ExprKind::Int(_) => Ok(Ty::named("Int")),
+            ExprKind::String(_) => Ok(Ty::named("String")),
+            ExprKind::Unit => Ok(Ty::named("unit")),
+            ExprKind::Name(n) => {
+                if let Some(t) = env.get(n) {
+                    return Ok(t.clone());
+                }
+                if n == "None" {
+                    return Ok(Ty::Option(Box::new(Ty::Never)));
+                }
+                if let Some(c) = self.constructors.get(n) {
+                    if !c.payload.is_empty() || !c.fields.is_empty() {
+                        return Err(Error::new(e.span, "constructor requires payload/fields"));
+                    }
+                    return Ok(Ty::named(&c.ty));
+                }
+                if property && let Ok(t) = self.resolve(&Type::named(n), e.span) {
+                    return Ok(Ty::List(Box::new(t)));
+                }
+                Err(Error::new(e.span, format!("unknown name `{n}`")))
+            }
+            ExprKind::Record(n, fs) => {
+                let c = self
+                    .constructors
+                    .get(n)
+                    .ok_or_else(|| Error::new(e.span, "unknown record constructor"))?;
+                if !c.payload.is_empty() || c.fields.is_empty() || !c.fields.keys().eq(fs.keys()) {
+                    return Err(Error::new(
+                        e.span,
+                        "record fields do not match its declaration",
+                    ));
+                }
+                for (n, x) in fs {
+                    self.require(&self.resolve(&c.fields[n], x.span)?, &pure(x)?, x.span)?;
+                }
+                Ok(Ty::named(&c.ty))
+            }
+            ExprKind::List(xs) => {
+                let mut ty = Ty::Never;
+                for x in xs {
+                    let t = pure(x)?;
+                    ty = ty.merge(&t).ok_or_else(|| {
+                        Error::new(x.span, "list elements must have a single compatible type")
+                    })?;
+                }
+                Ok(Ty::List(Box::new(ty)))
+            }
+            ExprKind::Field(x, n) => match pure(x)? {
+                Ty::Request(h) => {
+                    let handler = &self.handlers[&h];
+                    match n.as_str() {
+                        "input" => self.resolve(&handler.input, e.span),
+                        "response" => {
+                            Ok(Ty::Option(Box::new(self.resolve(&handler.output, e.span)?)))
+                        }
+                        "accepted" | "completed" => Ok(boolty),
+                        _ => Err(Error::new(e.span, "unknown request field")),
+                    }
+                }
+                Ty::Named(t) => {
+                    let cs: Vec<_> = self.constructors.values().filter(|c| c.ty == t).collect();
+                    if cs.len() != 1 {
+                        return Err(Error::new(e.span, "field access requires a record type"));
+                    }
+                    let ty = cs[0]
+                        .fields
+                        .get(n)
+                        .ok_or_else(|| Error::new(e.span, format!("unknown field `{n}`")))?;
+                    self.resolve(ty, e.span)
+                }
+                _ => Err(Error::new(e.span, "field access requires a record")),
+            },
+            ExprKind::Call(f, args) => {
+                let path = f.path().unwrap_or_default();
+                if path == "respond" {
+                    if property || !effect || args.len() != 1 {
+                        return Err(Error::new(
+                            e.span,
+                            "respond must be a direct handler statement with one argument",
+                        ));
+                    }
+                    self.require(
+                        output.ok_or_else(|| Error::new(e.span, "respond outside handler"))?,
+                        &pure(&args[0])?,
+                        e.span,
+                    )?;
+                    return Ok(Ty::Never);
+                }
+                if path == "requests" {
+                    if !property || args.len() != 1 {
+                        return Err(Error::new(
+                            e.span,
+                            "requests is a property-only view of one handler",
+                        ));
+                    }
+                    let h = args[0]
+                        .path()
+                        .filter(|h| self.handlers.contains_key(h))
+                        .ok_or_else(|| Error::new(e.span, "unknown handler in requests view"))?;
+                    return Ok(Ty::List(Box::new(Ty::Request(h))));
+                }
+                if ["Some", "Ok", "Err"].contains(&path.as_str()) {
+                    if args.len() != 1 {
+                        return Err(Error::new(e.span, "constructor requires one argument"));
+                    }
+                    let t = Box::new(pure(&args[0])?);
+                    return Ok(match path.as_str() {
+                        "Some" => Ty::Option(t),
+                        "Ok" => Ty::Result(t, Box::new(Ty::Never)),
+                        _ => Ty::Result(Box::new(Ty::Never), t),
+                    });
+                }
+                if let Some(c) = self.constructors.get(&path) {
+                    if !c.fields.is_empty() || c.payload.len() != args.len() {
+                        return Err(Error::new(e.span, "constructor arity mismatch"));
+                    }
+                    for (t, x) in c.payload.iter().zip(args) {
+                        self.require(&self.resolve(t, e.span)?, &pure(x)?, x.span)?;
+                    }
+                    return Ok(Ty::named(&c.ty));
+                }
+                if let ExprKind::Field(receiver, method) = &f.kind {
+                    if let Some(t) = receiver.path().and_then(|p| self.tables.get(&p)) {
+                        if property || !effect {
+                            return Err(Error::new(
+                                e.span,
+                                "resource operations must be direct handler statements or let bindings; properties inspect .rows",
+                            ));
+                        }
+                        let key = &t
+                            .fields
+                            .values()
+                            .find(|f| f.primary)
+                            .expect("validated key")
+                            .ty;
+                        let expected = match method.as_str() {
+                            "get" | "delete" => vec![self.resolve(key, e.span)?],
+                            "insert" => vec![Ty::named(&t.name)],
+                            "update" => vec![self.resolve(key, e.span)?, Ty::named(&t.name)],
+                            _ => return Err(Error::new(e.span, "unsupported D1 operation")),
+                        };
+                        if expected.len() != args.len() {
+                            return Err(Error::new(e.span, "D1 operation arity mismatch"));
+                        }
+                        for (t, x) in expected.iter().zip(args) {
+                            self.require(t, &pure(x)?, x.span)?;
+                        }
+                        return Ok(if method == "get" {
+                            Ty::Option(Box::new(Ty::named(&t.name)))
+                        } else {
+                            Ty::Result(
+                                Box::new(Ty::named("unit")),
+                                Box::new(Ty::named("DataError")),
+                            )
+                        });
+                    }
+                    if method == "contains_key" {
+                        let Ty::Rows(path) = pure(receiver)? else {
+                            return Err(Error::new(
+                                e.span,
+                                "contains_key requires a table rows view",
+                            ));
+                        };
+                        if args.len() != 1 {
+                            return Err(Error::new(e.span, "contains_key requires one key"));
+                        }
+                        let key = &self.tables[&path]
+                            .fields
+                            .values()
+                            .find(|f| f.primary)
+                            .expect("validated key")
+                            .ty;
+                        self.require(&self.resolve(key, e.span)?, &pure(&args[0])?, e.span)?;
+                        return Ok(boolty);
+                    }
+                }
+                Err(Error::new(
+                    e.span,
+                    format!("unknown or unsupported operation `{path}`"),
+                ))
+            }
+            ExprKind::Unary(op, x) => {
+                let t = pure(x)?;
+                match op.as_str() {
+                    "always" | "eventually" => {
+                        if !property || (t != boolty && t != Ty::Temporal) {
+                            return Err(Error::new(
+                                e.span,
+                                "temporal operator requires a predicate/property",
+                            ));
+                        }
+                        Ok(Ty::Temporal)
+                    }
+                    "!" | "not" => {
+                        self.require(&boolty, &t, e.span)?;
+                        Ok(boolty)
+                    }
+                    "-" => {
+                        self.require(&Ty::named("Int"), &t, e.span)?;
+                        Ok(t)
+                    }
+                    _ => Err(Error::new(e.span, "unsupported unary operator")),
+                }
+            }
+            ExprKind::Binary(op, a, b) => {
+                let at = pure(a)?;
+                let bt = pure(b)?;
+                match op.as_str() {
+                    "leads_to" | "until" => {
+                        if !property {
+                            return Err(Error::new(e.span, "temporal operator outside property"));
+                        }
+                        self.require(&boolty, &at, a.span)?;
+                        self.require(&boolty, &bt, b.span)?;
+                        Ok(Ty::Temporal)
+                    }
+                    "implies" | "&&" | "||" => {
+                        if property && (at == Ty::Temporal || bt == Ty::Temporal) {
+                            if ![boolty.clone(), Ty::Temporal].contains(&at)
+                                || ![boolty.clone(), Ty::Temporal].contains(&bt)
+                            {
+                                return Err(Error::new(e.span, "invalid temporal operand"));
+                            }
+                            Ok(Ty::Temporal)
+                        } else {
+                            self.require(&boolty, &at, a.span)?;
+                            self.require(&boolty, &bt, b.span)?;
+                            Ok(boolty)
+                        }
+                    }
+                    "==" | "!=" => {
+                        if at == Ty::Temporal || bt == Ty::Temporal {
+                            return Err(Error::new(e.span, "cannot compare temporal formulas"));
+                        }
+                        self.require(&at, &bt, e.span)?;
+                        Ok(boolty)
+                    }
+                    "+" | "-" | "<" | ">" | "<=" | ">=" => {
+                        self.require(&Ty::named("Int"), &at, a.span)?;
+                        self.require(&Ty::named("Int"), &bt, b.span)?;
+                        Ok(if op == "+" || op == "-" { at } else { boolty })
+                    }
+                    _ => Err(Error::new(e.span, "unsupported binary operator")),
+                }
+            }
+            ExprKind::Quant {
+                all: _,
+                var,
+                domain,
+                body,
+            } => {
+                if !property {
+                    return Err(Error::new(e.span, "quantifiers are property-only"));
+                }
+                let t = match pure(domain)? {
+                    Ty::List(t) => *t,
+                    Ty::Rows(p) => Ty::named(&self.tables[&p].name),
+                    _ => {
+                        return Err(Error::new(
+                            domain.span,
+                            "quantifier requires a finite collection/domain",
+                        ));
+                    }
+                };
+                let mut env = env.clone();
+                if env.insert(var.clone(), t).is_some() {
+                    return Err(Error::new(e.span, "quantifier shadows variable"));
+                }
+                let t = self.type_expr(body, &env, output, property, false)?;
+                if t != boolty && t != Ty::Temporal {
+                    return Err(Error::new(
+                        body.span,
+                        "quantifier body must be Boolean or temporal",
+                    ));
+                }
+                Ok(t)
+            }
+        }
+    }
+    fn push(&mut self, instruction: Instruction, span: Span) -> usize {
+        let i = self.code.len();
+        self.code.push(Code { instruction, span });
+        i
+    }
+    fn lower(&mut self, body: &[Stmt], mut next: usize) -> usize {
+        for s in body.iter().rev() {
+            let instruction = match &s.kind {
+                StmtKind::Let(n, e) => Instruction::Let {
+                    name: n.clone(),
+                    value: e.clone(),
+                    next,
+                },
+                StmtKind::Expr(e) => Instruction::Eval {
+                    value: e.clone(),
+                    next,
+                },
+                StmtKind::Match(e, arms) => Instruction::Match {
+                    value: e.clone(),
+                    arms: arms
+                        .iter()
+                        .map(|(p, b)| (p.clone(), self.lower(b, next)))
+                        .collect(),
+                },
+            };
+            next = self.push(instruction, s.span);
+        }
+        next
+    }
+}
+
+/// This explicit whitelist is part of the checking contract, not a parser convenience.
+pub fn validate_temporal(e: &Expr) -> Result<()> {
+    use ExprKind::*;
+    let state = |e: &Expr| !e.temporal();
+    let valid = match &e.kind {
+        Quant {
+            all: true,
+            domain,
+            body,
+            ..
+        } => {
+            let stable = matches!(domain.kind, Name(_))
+                || matches!(&domain.kind,Call(f,_) if f.path().as_deref()==Some("requests"));
+            if !stable {
+                return Err(Error::new(
+                    domain.span,
+                    "temporal quantification requires a stable type domain or requests view",
+                ));
+            }
+            validate_temporal(body)?;
+            true
+        }
+        Binary(op, a, b) if op == "&&" => {
+            validate_temporal(a)?;
+            validate_temporal(b)?;
+            true
+        }
+        Binary(op, a, b) if op == "leads_to" || op == "until" => state(a) && state(b),
+        Unary(op, x) if op == "always" || op == "eventually" => {
+            state(x)
+                || match &x.kind {
+                    Unary(inner, p) => {
+                        ((op == "always" && inner == "eventually")
+                            || (op == "eventually" && inner == "always"))
+                            && state(p)
+                    }
+                    Binary(imp, p, q) if op == "always" && imp == "implies" && state(p) => {
+                        matches!(&q.kind,Unary(g,r) if g=="always"&&state(r))
+                    }
+                    _ => false,
+                }
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::new(
+            e.span,
+            "unsupported temporal fragment; use always, eventually, leads_to, until, GF, FG, or persistence with state predicates",
+        ))
+    }
+}

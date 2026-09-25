@@ -1,0 +1,5 @@
+/target/
+*.trace.json
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/corpus/

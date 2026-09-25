@@ -1,0 +1,30 @@
+[package]
+name = "flareml-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+flareml = { path = ".." }
+serde_json = "1"
+
+[[bin]]
+name = "source"
+path = "fuzz_targets/source.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trace_json"
+path = "fuzz_targets/trace_json.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

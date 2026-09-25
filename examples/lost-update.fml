@@ -1,0 +1,52 @@
+// Two requests can read the same value before either write commits.
+type CounterId = Shared
+type Reply = Done | Rejected
+
+d1 AppDB {
+  table Counter {
+    id: CounterId primary_key
+    value: Int
+  }
+}
+
+worker CounterAPI {
+  increment(request: CounterId): Reply {
+    let row = AppDB.Counter.get(request);
+    match row {
+      | None -> respond(Rejected)
+      | Some(counter) -> {
+        let updated = AppDB.Counter.update(request, Counter {
+          id: request,
+          value: counter.value + 1
+        });
+        match updated {
+          | Ok(_) -> respond(Done)
+          | Err(_) -> respond(Rejected)
+        }
+      }
+    }
+  }
+}
+
+invariant "two successful increments are not lost" {
+  (forall (r in requests(CounterAPI.increment)) {
+    r.response == Some(Done)
+  }) implies (forall (row in AppDB.Counter.rows) { row.value == 2 })
+}
+
+property "accepted increments eventually respond" {
+  forall (r in requests(CounterAPI.increment)) {
+    r.accepted leads_to r.completed
+  }
+}
+
+check Concurrent {
+  semantics = "cf-core-v0"
+  domain Int = 0..2
+  init { AppDB.Counter = [Counter { id: Shared, value: 0 }] }
+  inputs {
+    once CounterAPI.increment(Shared)
+    once CounterAPI.increment(Shared)
+  }
+  fairness { weak runtime.progress }
+}

@@ -1,0 +1,58 @@
+// examples/login-bug.fml
+
+type UserId = Alice | Bob
+
+type LoginRequest = LoginRequest { user_id: UserId }
+type LoginReply = Allowed | Denied
+
+d1 AppDB {
+  table User {
+    id: UserId primary_key
+  }
+}
+
+worker LoginAPI {
+  handle_request(request: LoginRequest): LoginReply {
+    let user = AppDB.User.get(request.user_id);
+    match user {
+      | Some(_) -> respond(Allowed)
+      | None -> respond(Allowed) // BUG: should be Denied
+    }
+  }
+}
+
+invariant "a non-existing user can't log in" {
+  forall (r in requests(LoginAPI.handle_request)) {
+    (r.response == Some(Allowed)) implies
+      AppDB.User.rows.contains_key(r.input.user_id)
+  }
+}
+
+property "an accepted login eventually responds" {
+  forall (r in requests(LoginAPI.handle_request)) {
+    r.accepted leads_to r.completed
+  }
+}
+
+cover "an existing user can log in" {
+  exists (r in requests(LoginAPI.handle_request)) {
+    r.response == Some(Allowed) && r.input.user_id == Alice
+  }
+}
+
+check Login {
+  semantics = "cf-core-v0"
+
+  init {
+    AppDB.User = [User { id: Alice }]
+  }
+
+  inputs {
+    once LoginAPI.handle_request(LoginRequest { user_id: Alice })
+    once LoginAPI.handle_request(LoginRequest { user_id: Bob })
+  }
+
+  fairness {
+    weak runtime.progress
+  }
+}
