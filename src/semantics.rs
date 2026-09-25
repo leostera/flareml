@@ -18,6 +18,7 @@ pub enum Value {
     Request(usize),
     Actor(String),
     KeyedActor(String, Box<Value>),
+    Address(String, Box<Value>),
     Rows(String),
 }
 impl Value {
@@ -62,6 +63,7 @@ impl std::fmt::Display for Value {
             Self::Request(i) => write!(f, "request #{i}"),
             Self::Actor(name) => write!(f, "actor {name}"),
             Self::KeyedActor(name, key) => write!(f, "actor {name}.at({key})"),
+            Self::Address(name, key) => write!(f, "{name}.at({key})"),
             Self::Rows(n) => write!(f, "{n}.rows"),
         }
     }
@@ -269,6 +271,7 @@ impl Program {
                     ));
                 }
             }
+            Value::Address(_, key) => self.check_value(key, span)?,
             Value::Variant(_, xs) | Value::List(xs) => {
                 for x in xs {
                     self.check_value(x, span)?;
@@ -478,6 +481,24 @@ impl Program {
             },
             Call(f, args) => {
                 let path = f.path().unwrap_or_default();
+                if let ExprKind::Field(actor, method) = &f.kind
+                    && method == "at"
+                    && let ExprKind::Name(name) = &actor.kind
+                    && self.actors.get(name).is_some_and(|a| a.key.is_some())
+                {
+                    let key = ev(&args[0])?;
+                    if !s
+                        .keyed_actors
+                        .get(name)
+                        .is_some_and(|values| values.contains_key(&key))
+                    {
+                        return Err(Error::new(
+                            e.span,
+                            "LIMIT: actor key outside finite identity domain",
+                        ));
+                    }
+                    return Ok(Value::Address(name.clone(), Box::new(key)));
+                }
                 if let Some(function) = self.functions.get(&path) {
                     if self.effects[&path].suspends_or_writes() {
                         return Err(Error::new(
@@ -887,12 +908,27 @@ impl Program {
                     if let ExprKind::Call(f, args) = &value.kind {
                         let path = f.path().unwrap_or_default();
                         if path == "call" {
-                            let (handler, key_expr) =
-                                actor_target(&args[0]).expect("checked call target");
-                            let key = key_expr
-                                .as_ref()
-                                .map(|e| self.eval(e, &s.frames[i].env, s))
-                                .transpose()?;
+                            let static_target = actor_target(&args[0])
+                                .filter(|(target, _)| self.handlers.contains_key(target));
+                            let (handler, key) = if let Some((handler, key_expr)) = static_target {
+                                let key = key_expr
+                                    .as_ref()
+                                    .map(|e| self.eval(e, &s.frames[i].env, s))
+                                    .transpose()?;
+                                (handler, key)
+                            } else if let ExprKind::Field(receiver, method) = &args[0].kind {
+                                let Value::Address(actor, key) =
+                                    self.eval(receiver, &s.frames[i].env, s)?
+                                else {
+                                    return Err(Error::new(
+                                        value.span,
+                                        "internal: call requires an address",
+                                    ));
+                                };
+                                (format!("{actor}.{method}"), Some(*key))
+                            } else {
+                                return Err(Error::new(value.span, "internal: invalid actor call"));
+                            };
                             if let Some(key) = &key {
                                 self.check_value(key, value.span)?;
                                 if !s.keyed_actors[&self.handlers[&handler].actor].contains_key(key)

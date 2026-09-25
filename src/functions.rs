@@ -28,7 +28,7 @@ impl Program {
         );
         names.extend(
             [
-                "call", "requests", "respond", "Some", "None", "Ok", "Err", "Actor",
+                "call", "requests", "respond", "Some", "None", "Ok", "Err", "Actor", "Address",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -148,6 +148,10 @@ impl Program {
                 span,
                 "Actor<State> is an owned capability, not storable/returnable/message data",
             ));
+        }
+        if ty.name == "Address" {
+            self.resolve(ty, span)?;
+            return Ok(());
         }
         self.resolve(ty, span)?;
         for arg in &ty.args {

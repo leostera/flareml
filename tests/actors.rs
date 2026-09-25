@@ -7,6 +7,7 @@ const STATEFUL: &str = include_str!("../examples/actor-counter.fml");
 const CALL: &str = include_str!("../examples/actor-call.fml");
 const KEYED: &str = include_str!("../examples/actor-keyed.fml");
 const INTERLEAVING: &str = include_str!("../examples/actor-interleaving.fml");
+const ADDRESS: &str = include_str!("../examples/actor-address.fml");
 fn run(source: &str) -> checker::Report {
     let p = compile(source, None).unwrap();
     checker::check(source, &p, &Options::default()).unwrap()
@@ -51,6 +52,25 @@ fn stateful_capability_must_match_and_cannot_be_returned() {
         "let increment = (owner: Actor<Int>, amount: Int): Actor<Int>",
     );
     assert!(compile(&bad, None).is_err());
+}
+#[test]
+fn owner_capabilities_cannot_escape_through_nested_data_types() {
+    for declaration in [
+        "type Leak = Leak(Actor<Int>)",
+        "type Leak = Leak { owner: Option<Actor<Int>> }",
+        "type Envelope = Envelope { owner: Actor<Int> }\ntype Leak = Leak(Envelope)",
+    ] {
+        let source = STATEFUL.replace(
+            "type Reply = Count(Int)",
+            &format!("type Reply = Count(Int)\n{declaration}"),
+        );
+        assert!(
+            compile(&source, None)
+                .unwrap_err()
+                .message
+                .contains("owned capability")
+        );
+    }
 }
 #[test]
 fn recursive_pure_calls_are_rejected() {
@@ -251,6 +271,44 @@ fn same_key_interleaves_while_calling_another_actor() {
         witness.states.last().unwrap().keyed_actors["Counter"]
             [&flareml::semantics::Value::Variant("Shared".into(), vec![])],
         flareml::semantics::Value::Int(1)
+    );
+}
+#[test]
+fn typed_addresses_can_cross_messages_and_route_calls() {
+    let p = compile(ADDRESS, None).unwrap();
+    let report = run(ADDRESS);
+    assert_eq!(report.status, Status::VerifiedInScope);
+    let input = &p.initial().unwrap().frames[0].input;
+    assert!(matches!(input, flareml::semantics::Value::Record(_, fields)
+        if matches!(fields.get("target"), Some(flareml::semantics::Value::Address(_, _)))));
+    let bad = ADDRESS.replace("Account.at(Bob), amount: 1", "Account.at(Alice), amount: 1");
+    let p = compile(&bad, None).unwrap();
+    let report = run(&bad);
+    assert_eq!(report.status, Status::Violated);
+    report.witness().unwrap().validate(&bad, &p).unwrap();
+}
+#[test]
+fn addresses_are_not_owner_capabilities() {
+    let bad = ADDRESS.replace("target: Address<Account>", "target: Actor<Int>");
+    assert!(
+        compile(&bad, None)
+            .unwrap_err()
+            .message
+            .contains("owned capability")
+    );
+    let bad = ADDRESS.replace("target: Account.at(Alice)", "target: Account.at(1)");
+    assert!(
+        compile(&bad, None)
+            .unwrap_err()
+            .message
+            .contains("type mismatch")
+    );
+    let bad = ADDRESS.replace("input.target.deposit", "input.target.unknown");
+    assert!(
+        compile(&bad, None)
+            .unwrap_err()
+            .message
+            .contains("known actor handler")
     );
 }
 #[test]

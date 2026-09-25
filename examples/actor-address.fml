@@ -1,0 +1,36 @@
+// Addresses are typed data; unlike Actor<State>, they can cross boundaries.
+type AccountId = Alice | Bob
+type Reply = Balance(Int)
+type Dispatch = Dispatch { target: Address<Account>, amount: Int }
+
+let deposit = (owner: Actor<Int>, amount: Int): Reply {
+  owner.set(owner.state + amount)
+  Balance(owner.state)
+}
+stateful actor Account(id: AccountId) {
+  state: Int = 0
+  deposit = deposit
+}
+
+let forward = (input: Dispatch): Reply {
+  let answer = call(input.target.deposit, input.amount)
+  answer
+}
+stateless actor API { send = forward }
+
+invariant "addresses select independent owners" {
+  Account.at(Alice).state <= 1 && Account.at(Bob).state <= 1
+}
+property "replies return under fair progress" {
+  forall (r in requests(API.send)) { r.accepted leads_to r.completed }
+}
+
+check AddressRouting {
+  semantics = "actors-v1"
+  domain Int = 0..2
+  inputs {
+    once API.send(Dispatch { target: Account.at(Alice), amount: 1 })
+    once API.send(Dispatch { target: Account.at(Bob), amount: 1 })
+  }
+  fairness { weak runtime.progress }
+}

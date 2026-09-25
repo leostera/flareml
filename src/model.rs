@@ -11,6 +11,7 @@ pub enum Ty {
     Rows(String),
     Request(String),
     Actor(Box<Ty>),
+    Address(String),
     Temporal,
     Never,
 }
@@ -153,6 +154,7 @@ impl Program {
             "unit".to_owned(),
             "DataError".to_owned(),
             "Actor".to_owned(),
+            "Address".to_owned(),
         ]);
         for d in &p.model.types {
             if !type_names.insert(d.name.clone()) {
@@ -380,6 +382,22 @@ impl Program {
         Ok(p)
     }
     pub fn resolve(&self, t: &Type, span: Span) -> Result<Ty> {
+        if t.name == "Address" && t.args.len() == 1 {
+            let actor = &t.args[0];
+            if !actor.args.is_empty()
+                || !self
+                    .model
+                    .actors
+                    .iter()
+                    .any(|a| a.name == actor.name && a.key.is_some())
+            {
+                return Err(Error::new(
+                    span,
+                    "Address<ActorName> requires a keyed stateful actor",
+                ));
+            }
+            return Ok(Ty::Address(actor.name.clone()));
+        }
         if t.name == "Actor" && t.args.len() == 1 {
             return Ok(Ty::Actor(Box::new(self.resolve(&t.args[0], span)?)));
         }
@@ -623,6 +641,26 @@ impl Program {
                 .ok_or_else(|| Error::new(e.span, "stateless actors have no state"))?;
             return self.resolve(ty, e.span);
         }
+        if let ExprKind::Call(target, args) = &e.kind
+            && let ExprKind::Field(actor, method) = &target.kind
+            && method == "at"
+            && let ExprKind::Name(name) = &actor.kind
+            && let Some(decl) = self.actors.get(name)
+        {
+            let (_, key_ty) = decl
+                .key
+                .as_ref()
+                .ok_or_else(|| Error::new(e.span, "only keyed actors have addresses"))?;
+            if args.len() != 1 {
+                return Err(Error::new(e.span, "Actor.at requires exactly one key"));
+            }
+            self.require(
+                &self.resolve(key_ty, args[0].span)?,
+                &pure(&args[0])?,
+                args[0].span,
+            )?;
+            return Ok(Ty::Address(name.clone()));
+        }
         if let Some(path) = e.path()
             && property
             && path.ends_with(".rows")
@@ -746,23 +784,44 @@ impl Program {
                             "call(handler, message) must be a direct handler statement or let binding",
                         ));
                     }
-                    let (target, key) = actor_target(&args[0]).ok_or_else(|| {
-                        Error::new(args[0].span, "call requires a known actor handler")
-                    })?;
+                    let static_target = actor_target(&args[0])
+                        .filter(|(target, _)| self.handlers.contains_key(target));
+                    let dynamic = static_target.is_none();
+                    let (target, key) = if let Some(target) = static_target {
+                        target
+                    } else if let ExprKind::Field(receiver, method) = &args[0].kind {
+                        let Ty::Address(name) = pure(receiver)? else {
+                            return Err(Error::new(
+                                args[0].span,
+                                "call requires a known actor handler or typed address",
+                            ));
+                        };
+                        (format!("{name}.{method}"), None)
+                    } else {
+                        return Err(Error::new(
+                            args[0].span,
+                            "call requires a known actor handler or typed address",
+                        ));
+                    };
                     let handler = self.handlers.get(&target).ok_or_else(|| {
                         Error::new(args[0].span, "call requires a known actor handler")
                     })?;
-                    match (self.actors[&handler.actor].key.as_ref(), key.as_ref()) {
-                        (Some((_, ty)), Some(k)) => {
+                    match (
+                        self.actors[&handler.actor].key.as_ref(),
+                        key.as_ref(),
+                        dynamic,
+                    ) {
+                        (Some(_), None, true) => {}
+                        (Some((_, ty)), Some(k), _) => {
                             self.require(&self.resolve(ty, k.span)?, &pure(k)?, k.span)?;
                         }
-                        (Some(_), None) => {
+                        (Some(_), None, _) => {
                             return Err(Error::new(
                                 args[0].span,
                                 "keyed call requires Actor.at(key).method",
                             ));
                         }
-                        (None, Some(_)) => {
+                        (None, Some(_), _) => {
                             return Err(Error::new(
                                 args[0].span,
                                 "only keyed actors accept Actor.at(key).method",
