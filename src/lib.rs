@@ -1,6 +1,7 @@
 //! FlareML's native model-checking pipeline.
 pub mod checker;
 pub mod diagnostics;
+mod functions;
 pub mod graph;
 pub mod model;
 pub mod semantics;

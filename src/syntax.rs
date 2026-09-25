@@ -134,12 +134,28 @@ pub struct Stmt {
     pub span: Span,
 }
 #[derive(Clone, Debug)]
-pub struct Handler {
-    pub path: String,
-    pub param: String,
-    pub input: Type,
+pub struct Function {
+    pub name: String,
+    pub params: Vec<(String, Type)>,
     pub output: Type,
     pub body: Vec<Stmt>,
+    pub span: Span,
+}
+#[derive(Clone, Debug)]
+pub struct Actor {
+    pub name: String,
+    /// Owned state is retained between invocations; this does not imply durability.
+    pub state: Option<(Type, Expr)>,
+    pub handlers: BTreeMap<String, String>,
+    pub span: Span,
+}
+#[derive(Clone, Debug)]
+pub struct Handler {
+    pub path: String,
+    pub actor: String,
+    pub function: String,
+    pub input: Type,
+    pub output: Type,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,7 +191,8 @@ pub struct Check {
 pub struct Model {
     pub types: Vec<TypeDecl>,
     pub tables: Vec<Table>,
-    pub handlers: Vec<Handler>,
+    pub functions: Vec<Function>,
+    pub actors: Vec<Actor>,
     pub claims: Vec<Claim>,
     pub checks: Vec<Check>,
 }
@@ -239,6 +256,7 @@ struct Parser {
     tokens: Vec<Token>,
     i: usize,
     depth: usize,
+    legacy_worker: bool,
 }
 impl Parser {
     fn token(&self) -> &Token {
@@ -527,7 +545,16 @@ impl Parser {
             }
             StmtKind::Match(e, arms)
         } else {
-            StmtKind::Expr(self.expr(0)?)
+            let mut value = self.expr(0)?;
+            // Compatibility only: the core AST has functions/actors, not workers/respond.
+            if self.legacy_worker
+                && let ExprKind::Call(target, args) = &value.kind
+                && target.path().as_deref() == Some("respond")
+                && args.len() == 1
+            {
+                value.kind = args[0].kind.clone();
+            }
+            StmtKind::Expr(value)
         };
         self.depth -= 1;
         Ok(Stmt { kind, span })
@@ -619,12 +646,78 @@ impl Parser {
                         span,
                     });
                 }
-            } else if self.eat("worker") {
-                let worker = self.name()?;
+            } else if self.eat("let") {
+                let name = self.name()?;
+                self.expect("=")?;
+                self.expect("(")?;
+                let mut params = vec![];
+                while !self.eat(")") {
+                    let param = self.name()?;
+                    self.expect(":")?;
+                    params.push((param, self.ty()?));
+                    if !self.eat(",") {
+                        self.expect(")")?;
+                        break;
+                    }
+                }
+                let output = if self.eat(":") {
+                    self.ty()?
+                } else {
+                    Type::named("unit")
+                };
+                let body = self.block()?;
+                m.functions.push(Function {
+                    name,
+                    params,
+                    output,
+                    body,
+                    span,
+                });
+            } else if self.at("stateless") || self.at("stateful") {
+                let stateful = self.take().text == "stateful";
+                self.expect("actor")?;
+                let name = self.name()?;
                 self.expect("{")?;
+                let mut state = None;
+                let mut handlers = BTreeMap::new();
                 while !self.eat("}") {
-                    let span = self.token().span;
-                    let name = self.name()?;
+                    if self.eat("state") {
+                        if !stateful || state.is_some() {
+                            return self.err("only a stateful actor can declare one state field");
+                        }
+                        self.expect(":")?;
+                        let ty = self.ty()?;
+                        self.expect("=")?;
+                        state = Some((ty, self.expr(0)?));
+                    } else {
+                        let method = self.name()?;
+                        self.expect("=")?;
+                        let function = self.name()?;
+                        if handlers.insert(method, function).is_some() {
+                            return self.err("duplicate actor handler binding");
+                        }
+                    }
+                    self.eat(";");
+                }
+                if stateful && state.is_none() {
+                    return self.err("stateful actor requires `state: Type = initial_value`");
+                }
+                if handlers.is_empty() {
+                    return self.err("actor requires at least one function binding");
+                }
+                m.actors.push(Actor {
+                    name,
+                    state,
+                    handlers,
+                    span,
+                });
+            } else if self.eat("worker") {
+                // Transitional frontend shim so the checkpoint's regression corpus still runs.
+                let name = self.name()?;
+                self.expect("{")?;
+                let mut bindings = BTreeMap::new();
+                while !self.eat("}") {
+                    let method = self.name()?;
                     self.expect("(")?;
                     let param = self.name()?;
                     self.expect(":")?;
@@ -635,16 +728,27 @@ impl Parser {
                     } else {
                         Type::named("unit")
                     };
+                    self.legacy_worker = true;
                     let body = self.block()?;
-                    m.handlers.push(Handler {
-                        path: format!("{worker}.{name}"),
-                        param,
-                        input,
+                    self.legacy_worker = false;
+                    let function = format!("$legacy.{name}.{method}");
+                    if bindings.insert(method, function.clone()).is_some() {
+                        return self.err("duplicate legacy handler");
+                    }
+                    m.functions.push(Function {
+                        name: function,
+                        params: vec![(param, input)],
                         output,
                         body,
                         span,
                     });
                 }
+                m.actors.push(Actor {
+                    name,
+                    state: None,
+                    handlers: bindings,
+                    span,
+                });
             } else if ["invariant", "property", "cover"]
                 .iter()
                 .any(|s| self.at(s))
@@ -776,6 +880,7 @@ pub fn parse(source: &str) -> Result<Model> {
         tokens: lex(source)?,
         i: 0,
         depth: 0,
+        legacy_worker: false,
     }
     .model()
 }

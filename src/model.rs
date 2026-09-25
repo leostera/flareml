@@ -10,6 +10,7 @@ pub enum Ty {
     List(Box<Ty>),
     Rows(String),
     Request(String),
+    Actor(Box<Ty>),
     Temporal,
     Never,
 }
@@ -42,6 +43,7 @@ pub struct Constructor {
 #[derive(Clone, Debug)]
 pub enum Instruction {
     End,
+    Return(Expr),
     Let {
         name: String,
         value: Expr,
@@ -61,6 +63,22 @@ pub struct Code {
     pub instruction: Instruction,
     pub span: Span,
 }
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Effects {
+    pub io: bool,
+    pub writes_state: bool,
+    pub inspects: bool,
+}
+impl Effects {
+    pub fn suspends_or_writes(self) -> bool {
+        self.io || self.writes_state
+    }
+    pub fn include(&mut self, other: Self) {
+        self.io |= other.io;
+        self.writes_state |= other.writes_state;
+        self.inspects |= other.inspects;
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Program {
     pub model: Model,
@@ -69,6 +87,9 @@ pub struct Program {
     pub aliases: BTreeMap<String, String>,
     pub tables: BTreeMap<String, Table>,
     pub handlers: BTreeMap<String, Handler>,
+    pub functions: BTreeMap<String, Function>,
+    pub actors: BTreeMap<String, Actor>,
+    pub effects: BTreeMap<String, Effects>,
     pub code: Vec<Code>,
     pub entries: BTreeMap<String, usize>,
 }
@@ -95,10 +116,21 @@ impl Program {
             ));
         }
         .clone();
-        if check.semantics != "cf-core-v0" {
+        if !["actors-v0", "cf-core-v0"].contains(&check.semantics.as_str()) {
             return Err(Error::new(
                 check.span,
-                "unsupported semantics; expected \"cf-core-v0\"",
+                "unsupported semantics; new actor models use \"actors-v0\"",
+            ));
+        }
+        if check.semantics == "cf-core-v0"
+            && model
+                .functions
+                .iter()
+                .any(|f| !f.name.starts_with("$legacy."))
+        {
+            return Err(Error::new(
+                check.span,
+                "general functions/actors require the \"actors-v0\" profile",
             ));
         }
         let mut p = Self {
@@ -108,6 +140,9 @@ impl Program {
             aliases: BTreeMap::new(),
             tables: BTreeMap::new(),
             handlers: BTreeMap::new(),
+            functions: BTreeMap::new(),
+            actors: BTreeMap::new(),
+            effects: BTreeMap::new(),
             code: vec![],
             entries: BTreeMap::new(),
         };
@@ -117,6 +152,7 @@ impl Program {
             "String".to_owned(),
             "unit".to_owned(),
             "DataError".to_owned(),
+            "Actor".to_owned(),
         ]);
         for d in &p.model.types {
             if !type_names.insert(d.name.clone()) {
@@ -213,11 +249,7 @@ impl Program {
                 }
             }
         }
-        for h in &p.model.handlers {
-            if p.handlers.insert(h.path.clone(), h.clone()).is_some() {
-                return Err(Error::new(h.span, "duplicate handler"));
-            }
-        }
+        p.bind_actors_and_functions()?;
         let mut names = BTreeSet::new();
         for c in &p.model.claims {
             if !names.insert(c.name.clone()) {
@@ -264,15 +296,34 @@ impl Program {
             let actual = p.type_expr(&i.value, &env, None, false, false)?;
             p.require(&p.resolve(&h.input, h.span)?, &actual, i.span)?;
         }
-        for h in p.handlers.values() {
-            let input = p.resolve(&h.input, h.span)?;
-            let output = p.resolve(&h.output, h.span)?;
-            let mut env = BTreeMap::from([(h.param.clone(), input)]);
-            let terminal = p.type_block(&h.body, &mut env, &output)?;
+        for actor in p.actors.values() {
+            if let Some((ty, initial)) = &actor.state {
+                let actual = p.type_expr(initial, &env, None, false, false)?;
+                p.require(&p.resolve(ty, initial.span)?, &actual, initial.span)?;
+            }
+        }
+        for f in p.functions.values() {
+            let output = p.resolve(&f.output, f.span)?;
+            let mut env = BTreeMap::new();
+            for (name, ty) in &f.params {
+                if p.is_global(name) || env.insert(name.clone(), p.resolve(ty, f.span)?).is_some() {
+                    return Err(Error::new(
+                        f.span,
+                        "duplicate parameter or parameter shadows a global name",
+                    ));
+                }
+            }
+            let terminal = p.type_block(
+                &f.body,
+                &mut env,
+                &output,
+                p.effects[&f.name].inspects,
+                true,
+            )?;
             if !terminal && output != Ty::named("unit") {
                 return Err(Error::new(
-                    h.span,
-                    "non-unit request handler must respond on every branch",
+                    f.span,
+                    "non-unit function needs a result on every branch",
                 ));
             }
         }
@@ -290,15 +341,18 @@ impl Program {
                 p.require(&Ty::named("Bool"), &actual, c.span)?;
             }
         }
-        let handlers: Vec<_> = p.handlers.values().cloned().collect();
-        for h in handlers {
-            let end = p.push(Instruction::End, h.span);
-            let entry = p.lower(&h.body, end);
-            p.entries.insert(h.path, entry);
+        let functions: Vec<_> = p.functions.values().cloned().collect();
+        for f in functions {
+            let end = p.push(Instruction::End, f.span);
+            let entry = p.lower(&f.body, end, true);
+            p.entries.insert(f.name, entry);
         }
         Ok(p)
     }
     pub fn resolve(&self, t: &Type, span: Span) -> Result<Ty> {
+        if t.name == "Actor" && t.args.len() == 1 {
+            return Ok(Ty::Actor(Box::new(self.resolve(&t.args[0], span)?)));
+        }
         if t.name == "Option" && t.args.len() == 1 {
             return Ok(Ty::Option(Box::new(self.resolve(&t.args[0], span)?)));
         }
@@ -343,18 +397,15 @@ impl Program {
         body: &[Stmt],
         env: &mut BTreeMap<String, Ty>,
         output: &Ty,
+        property: bool,
+        tail: bool,
     ) -> Result<bool> {
         let mut terminal = false;
         for (index, s) in body.iter().enumerate() {
-            if terminal {
-                return Err(Error::new(s.span, "unreachable statement after response"));
-            }
+            let returns = tail && index + 1 == body.len();
             match &s.kind {
                 StmtKind::Let(n, e) => {
-                    let t = self.type_expr(e, env, Some(output), false, true)?;
-                    if t == Ty::Never {
-                        return Err(Error::new(e.span, "respond cannot be bound to a local"));
-                    }
+                    let t = self.type_expr(e, env, Some(output), property, true)?;
                     if matches!(t, Ty::Result(..)) {
                         let handled = body.get(index + 1).is_some_and(|next| matches!(
                             &next.kind,
@@ -367,22 +418,24 @@ impl Program {
                             ));
                         }
                     }
-                    if env.insert(n.clone(), t).is_some() {
+                    if self.is_global(n) || env.insert(n.clone(), t).is_some() {
                         return Err(Error::new(s.span, "local shadowing is not supported"));
                     }
                 }
                 StmtKind::Expr(e) => {
-                    let t = self.type_expr(e, env, Some(output), false, true)?;
-                    if matches!(t, Ty::Result(..)) {
+                    let t = self.type_expr(e, env, Some(output), property, true)?;
+                    if returns {
+                        self.require(output, &t, e.span)?;
+                        terminal = true;
+                    } else if matches!(t, Ty::Result(..)) {
                         return Err(Error::new(
                             e.span,
                             "handle the Result of this operation with match",
                         ));
                     }
-                    terminal = t == Ty::Never;
                 }
                 StmtKind::Match(e, arms) => {
-                    let ty = self.type_expr(e, env, Some(output), false, false)?;
+                    let ty = self.type_expr(e, env, Some(output), property, false)?;
                     if matches!(ty, Ty::Result(..))
                         && arms
                             .iter()
@@ -410,7 +463,8 @@ impl Program {
                                 }
                             }
                         }
-                        terminal &= self.type_block(statements, &mut inner, output)?;
+                        terminal &=
+                            self.type_block(statements, &mut inner, output, property, returns)?;
                     }
                     let cases: BTreeSet<_> = match &ty {
                         Ty::Option(_) => ["None".into(), "Some".into()].into(),
@@ -441,7 +495,7 @@ impl Program {
         match p {
             Pattern::Wild => Ok(()),
             Pattern::Bind(n) => {
-                if env.insert(n.clone(), ty.clone()).is_some() {
+                if self.is_global(n) || env.insert(n.clone(), ty.clone()).is_some() {
                     Err(Error::new(span, "pattern binding shadows another variable"))
                 } else {
                     Ok(())
@@ -487,6 +541,9 @@ impl Program {
             }
         }
     }
+    // Retain the signature during the spike to keep the type/effect call sites aligned;
+    // remove the now-redundant output context when the function IR is consolidated.
+    #[allow(clippy::only_used_in_recursion)]
     pub fn type_expr(
         &self,
         e: &Expr,
@@ -497,6 +554,22 @@ impl Program {
     ) -> Result<Ty> {
         let pure = |e: &Expr| self.type_expr(e, env, output, property, false);
         let boolty = Ty::named("Bool");
+        if let Some(actor) = e
+            .path()
+            .and_then(|path| path.strip_suffix(".state").and_then(|n| self.actors.get(n)))
+        {
+            if !property {
+                return Err(Error::new(
+                    e.span,
+                    "actor state inspection is property-only; handlers use their own Actor<State> capability",
+                ));
+            }
+            let (ty, _) = actor
+                .state
+                .as_ref()
+                .ok_or_else(|| Error::new(e.span, "stateless actors have no state"))?;
+            return self.resolve(ty, e.span);
+        }
         if let Some(path) = e.path()
             && property
             && path.ends_with(".rows")
@@ -556,6 +629,7 @@ impl Program {
                 Ok(Ty::List(Box::new(ty)))
             }
             ExprKind::Field(x, n) => match pure(x)? {
+                Ty::Actor(state) if n == "state" => Ok(*state),
                 Ty::Request(h) => {
                     let handler = &self.handlers[&h];
                     match n.as_str() {
@@ -583,18 +657,34 @@ impl Program {
             ExprKind::Call(f, args) => {
                 let path = f.path().unwrap_or_default();
                 if path == "respond" {
-                    if property || !effect || args.len() != 1 {
+                    return Err(Error::new(
+                        e.span,
+                        "functions return their last expression; replace respond(value) with value",
+                    ));
+                }
+                if let Some(function) = self.functions.get(&path) {
+                    let fx = self.effects[&path];
+                    if (fx.suspends_or_writes() && (property || !effect))
+                        || (fx.inspects && !property)
+                    {
                         return Err(Error::new(
                             e.span,
-                            "respond must be a direct handler statement with one argument",
+                            "function effects are not allowed here (effectful calls must be direct statements/bindings; inspectors are specification-only)",
                         ));
                     }
-                    self.require(
-                        output.ok_or_else(|| Error::new(e.span, "respond outside handler"))?,
-                        &pure(&args[0])?,
+                    if function.params.len() != args.len() {
+                        return Err(Error::new(e.span, "function argument count mismatch"));
+                    }
+                    for ((_, ty), arg) in function.params.iter().zip(args) {
+                        self.require(&self.resolve(ty, arg.span)?, &pure(arg)?, arg.span)?;
+                    }
+                    return self.resolve(&function.output, e.span);
+                }
+                if path == "call" {
+                    return Err(Error::new(
                         e.span,
-                    )?;
-                    return Ok(Ty::Never);
+                        "actor-to-actor call is not implemented in this checkpoint; drive actors through check inputs for now",
+                    ));
                 }
                 if path == "requests" {
                     if !property || args.len() != 1 {
@@ -630,6 +720,22 @@ impl Program {
                     return Ok(Ty::named(&c.ty));
                 }
                 if let ExprKind::Field(receiver, method) = &f.kind {
+                    if method == "set" {
+                        if property || !effect || args.len() != 1 {
+                            return Err(Error::new(
+                                e.span,
+                                "Actor.set(value) is a direct state effect",
+                            ));
+                        }
+                        let Ty::Actor(state) = pure(receiver)? else {
+                            return Err(Error::new(
+                                e.span,
+                                "set requires an owned Actor<State> capability",
+                            ));
+                        };
+                        self.require(&state, &pure(&args[0])?, e.span)?;
+                        return Ok(Ty::named("unit"));
+                    }
                     if let Some(t) = receiver.path().and_then(|p| self.tables.get(&p)) {
                         if property || !effect {
                             return Err(Error::new(
@@ -792,23 +898,39 @@ impl Program {
         self.code.push(Code { instruction, span });
         i
     }
-    fn lower(&mut self, body: &[Stmt], mut next: usize) -> usize {
-        for s in body.iter().rev() {
+    fn lower(&mut self, body: &[Stmt], mut next: usize, tail: bool) -> usize {
+        for (index, s) in body.iter().enumerate().rev() {
+            let returns = tail && index + 1 == body.len();
             let instruction = match &s.kind {
                 StmtKind::Let(n, e) => Instruction::Let {
                     name: n.clone(),
                     value: e.clone(),
                     next,
                 },
-                StmtKind::Expr(e) => Instruction::Eval {
-                    value: e.clone(),
-                    next,
-                },
+                StmtKind::Expr(e) => {
+                    if returns {
+                        let result = Expr {
+                            kind: ExprKind::Name("$result".into()),
+                            span: e.span,
+                        };
+                        let ret = self.push(Instruction::Return(result), e.span);
+                        Instruction::Let {
+                            name: "$result".into(),
+                            value: e.clone(),
+                            next: ret,
+                        }
+                    } else {
+                        Instruction::Eval {
+                            value: e.clone(),
+                            next,
+                        }
+                    }
+                }
                 StmtKind::Match(e, arms) => Instruction::Match {
                     value: e.clone(),
                     arms: arms
                         .iter()
-                        .map(|(p, b)| (p.clone(), self.lower(b, next)))
+                        .map(|(p, b)| (p.clone(), self.lower(b, next, returns)))
                         .collect(),
                 },
             };

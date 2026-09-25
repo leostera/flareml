@@ -1,0 +1,38 @@
+// Ordinary functions can be reused without being actor handlers.
+type Eligibility = Eligible | Ineligible
+type Request = Request { eligible: Eligibility }
+type Reply = Allowed | Denied
+
+let decision = (eligible: Eligibility): Reply {
+  match eligible {
+    | Eligible -> Allowed
+    | Ineligible -> Denied
+  }
+}
+
+let login = (request: Request): Reply {
+  decision(request.eligible)
+}
+
+stateless actor API {
+  handle_request = login
+}
+
+invariant "ineligible users cannot log in" {
+  forall (r in requests(API.handle_request)) {
+    r.response == Some(Allowed) implies r.input.eligible == Eligible
+  }
+}
+
+property "accepted requests eventually return" {
+  forall (r in requests(API.handle_request)) { r.accepted leads_to r.completed }
+}
+
+check Login {
+  semantics = "actors-v0"
+  inputs {
+    once API.handle_request(Request { eligible: Eligible })
+    once API.handle_request(Request { eligible: Ineligible })
+  }
+  fairness { weak runtime.progress }
+}

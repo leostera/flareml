@@ -63,6 +63,14 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
         trace.actions.len()
     )
     .unwrap();
+    for (name, value) in &trace.states[0].actors {
+        writeln!(
+            out,
+            "    {} {name}.state = {value}",
+            paint("initial", Tone::Dim, color)
+        )
+        .unwrap();
+    }
     for (name, rows) in &trace.states[0].tables {
         writeln!(
             out,
@@ -104,6 +112,16 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
         }
         let before = &trace.states[i];
         let after = &trace.states[i + 1];
+        for (actor, value) in &after.actors {
+            if before.actors.get(actor) != Some(value) {
+                writeln!(
+                    out,
+                    "        {}",
+                    paint(&format!("{actor}.state := {value}"), Tone::Warn, color)
+                )
+                .unwrap();
+            }
+        }
         for (table, rows) in &after.tables {
             if before.tables.get(table) != Some(rows) {
                 writeln!(

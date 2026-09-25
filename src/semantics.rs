@@ -16,6 +16,7 @@ pub enum Value {
     Record(String, BTreeMap<String, Value>),
     List(Vec<Value>),
     Request(usize),
+    Actor(String),
     Rows(String),
 }
 impl Value {
@@ -58,6 +59,7 @@ impl std::fmt::Display for Value {
             ),
             Self::List(xs) => write!(f, "[{}]", joined(xs)),
             Self::Request(i) => write!(f, "request #{i}"),
+            Self::Actor(name) => write!(f, "actor {name}"),
             Self::Rows(n) => write!(f, "{n}.rows"),
         }
     }
@@ -78,14 +80,22 @@ pub enum Phase {
     Done,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Continuation {
+    pub env: Env,
+    pub bind: Option<String>,
+    pub next: usize,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Frame {
     pub input: Value,
     pub env: Env,
     pub phase: Phase,
     pub response: Value,
+    pub stack: Vec<Continuation>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct State {
+    pub actors: BTreeMap<String, Value>,
     pub tables: BTreeMap<String, Vec<Value>>,
     pub frames: Vec<Frame>,
 }
@@ -106,8 +116,15 @@ impl Program {
     pub fn initial(&self) -> Result<State> {
         let mut s = State {
             tables: self.tables.keys().map(|n| (n.clone(), vec![])).collect(),
-            frames: vec![],
+            ..State::default()
         };
+        for actor in self.actors.values() {
+            if let Some((_, initial)) = &actor.state {
+                let value = self.eval(initial, &Env::new(), &s)?;
+                self.check_value(&value, initial.span)?;
+                s.actors.insert(actor.name.clone(), value);
+            }
+        }
         for (n, xs) in &self.check.init {
             let mut rows = vec![];
             for x in xs {
@@ -132,6 +149,7 @@ impl Program {
                 env: Env::new(),
                 phase: Phase::Unaccepted,
                 response: Value::none(),
+                stack: vec![],
             });
         }
         Ok(s)
@@ -148,10 +166,7 @@ impl Program {
                     self.check.domains.get(name).ok_or_else(|| {
                         Error::new(span, format!("missing finite domain for {name}"))
                     })?;
-                let empty = State {
-                    tables: BTreeMap::new(),
-                    frames: vec![],
-                };
+                let empty = State::default();
                 let values = xs
                     .iter()
                     .map(|x| self.eval(x, &Env::new(), &empty))
@@ -194,10 +209,7 @@ impl Program {
             return Ok(vec![Value::Unit]);
         }
         if let Some(xs) = self.check.domains.get(name) {
-            let s = State {
-                tables: BTreeMap::new(),
-                frames: vec![],
-            };
+            let s = State::default();
             return xs.iter().map(|x| self.eval(x, &Env::new(), &s)).collect();
         }
         let mut out = vec![];
@@ -282,6 +294,17 @@ impl Program {
     }
     pub fn eval(&self, e: &Expr, env: &Env, s: &State) -> Result<Value> {
         use ExprKind::*;
+        if let Some(actor) = e
+            .path()
+            .and_then(|path| path.strip_suffix(".state").map(str::to_owned))
+            && self.actors.contains_key(&actor)
+        {
+            return s
+                .actors
+                .get(&actor)
+                .cloned()
+                .ok_or_else(|| Error::new(e.span, "actor has no initialized state"));
+        }
         if let Some(path) = e.path()
             && path.ends_with(".rows")
         {
@@ -316,6 +339,11 @@ impl Program {
             )),
             List(xs) => Ok(Value::List(xs.iter().map(ev).collect::<Result<_>>()?)),
             Field(x, n) => match ev(x)? {
+                Value::Actor(actor) if n == "state" => s
+                    .actors
+                    .get(&actor)
+                    .cloned()
+                    .ok_or_else(|| Error::new(e.span, "actor capability has no state")),
                 Value::Record(_, fs) => fs
                     .get(n)
                     .cloned()
@@ -337,6 +365,22 @@ impl Program {
             },
             Call(f, args) => {
                 let path = f.path().unwrap_or_default();
+                if let Some(function) = self.functions.get(&path) {
+                    if self.effects[&path].suspends_or_writes() {
+                        return Err(Error::new(
+                            e.span,
+                            "internal: effectful function reached pure evaluation",
+                        ));
+                    }
+                    let values = args.iter().map(ev).collect::<Result<Vec<_>>>()?;
+                    let mut locals = function
+                        .params
+                        .iter()
+                        .zip(values)
+                        .map(|((name, _), v)| (name.clone(), v))
+                        .collect();
+                    return self.eval_function_body(&function.body, &mut locals, s);
+                }
                 if path == "requests" {
                     let h = args[0].path().unwrap_or_default();
                     return Ok(Value::List(
@@ -449,6 +493,37 @@ impl Program {
             }
         }
     }
+    fn eval_function_body(&self, body: &[Stmt], env: &mut Env, s: &State) -> Result<Value> {
+        let mut result = Value::Unit;
+        for statement in body {
+            result = match &statement.kind {
+                StmtKind::Let(name, expr) => {
+                    let value = self.eval(expr, env, s)?;
+                    env.insert(name.clone(), value);
+                    Value::Unit
+                }
+                StmtKind::Expr(expr) => self.eval(expr, env, s)?,
+                StmtKind::Match(expr, arms) => {
+                    let value = self.eval(expr, env, s)?;
+                    let mut result = None;
+                    for (pattern, branch) in arms {
+                        let mut locals = env.clone();
+                        if bind_pattern(pattern, &value, &mut locals) {
+                            result = Some(self.eval_function_body(branch, &mut locals, s)?);
+                            break;
+                        }
+                    }
+                    result.ok_or_else(|| {
+                        Error::new(
+                            statement.span,
+                            "internal: non-exhaustive pure function match",
+                        )
+                    })?
+                }
+            };
+        }
+        Ok(result)
+    }
     pub fn predicate(&self, e: &Expr, env: &Env, s: &State) -> Result<bool> {
         self.eval(e, env, s)?.bool(e.span)
     }
@@ -539,10 +614,19 @@ impl Program {
             let h = &self.handlers[&input.handler];
             let (description, span, id, fair) = match &frame.phase {
                 Phase::Unaccepted => {
-                    next.frames[i]
-                        .env
-                        .insert(h.param.clone(), frame.input.clone());
-                    next.frames[i].phase = Phase::Ready(self.entries[&input.handler]);
+                    let function = &self.functions[&h.function];
+                    let mut args = vec![];
+                    if self.actors[&h.actor].state.is_some() {
+                        args.push(Value::Actor(h.actor.clone()));
+                    }
+                    args.push(frame.input.clone());
+                    next.frames[i].env = function
+                        .params
+                        .iter()
+                        .zip(args)
+                        .map(|((name, _), v)| (name.clone(), v))
+                        .collect();
+                    next.frames[i].phase = Phase::Ready(self.entries[&h.function]);
                     (
                         format!("accept {}({}) as request #{i}", input.handler, frame.input),
                         input.span,
@@ -594,14 +678,33 @@ impl Program {
         Ok(steps)
     }
     fn resume(&self, s: &mut State, i: usize, mut pc: usize) -> Result<(String, Span)> {
-        // Lowering produces an acyclic control-flow graph. This guard also catches tool bugs.
-        for _ in 0..=self.code.len() {
+        // Function call graphs are acyclic and have a checked expansion budget.
+        for _ in 0..=20_000 {
             let code = &self.code[pc];
             match &code.instruction {
-                Instruction::End => {
-                    s.frames[i].phase = Phase::Done;
-                    s.frames[i].response = Value::some(Value::Unit);
-                    return Ok((format!("request #{i} returns unit"), code.span));
+                Instruction::End | Instruction::Return(_) => {
+                    let value = if let Instruction::Return(expr) = &code.instruction {
+                        self.eval(expr, &s.frames[i].env, s)?
+                    } else {
+                        Value::Unit
+                    };
+                    self.check_value(&value, code.span)?;
+                    if let Some(continuation) = s.frames[i].stack.pop() {
+                        s.frames[i].env = continuation.env;
+                        if let Some(name) = continuation.bind {
+                            s.frames[i].env.insert(name, value);
+                        }
+                        pc = continuation.next;
+                    } else {
+                        s.frames[i].phase = Phase::Done;
+                        s.frames[i].response = Value::some(value.clone());
+                        let verb = if self.check.semantics == "cf-core-v0" {
+                            "responds"
+                        } else {
+                            "returns"
+                        };
+                        return Ok((format!("request #{i} {verb} {value}"), code.span));
+                    }
                 }
                 Instruction::Match { value, arms } => {
                     let v = self.eval(value, &s.frames[i].env, s)?;
@@ -630,12 +733,49 @@ impl Program {
                     };
                     if let ExprKind::Call(f, args) = &value.kind {
                         let path = f.path().unwrap_or_default();
-                        if path == "respond" {
-                            let v = self.eval(&args[0], &s.frames[i].env, s)?;
-                            self.check_value(&v, value.span)?;
-                            s.frames[i].response = Value::some(v.clone());
-                            s.frames[i].phase = Phase::Done;
-                            return Ok((format!("request #{i} responds {v}"), value.span));
+                        if let Some(function) = self.functions.get(&path)
+                            && self.effects[&path].suspends_or_writes()
+                        {
+                            let values = args
+                                .iter()
+                                .map(|e| self.eval(e, &s.frames[i].env, s))
+                                .collect::<Result<Vec<_>>>()?;
+                            for v in &values {
+                                self.check_value(v, value.span)?;
+                            }
+                            let locals = function
+                                .params
+                                .iter()
+                                .zip(values)
+                                .map(|((name, _), v)| (name.clone(), v))
+                                .collect();
+                            let saved = std::mem::replace(&mut s.frames[i].env, locals);
+                            s.frames[i].stack.push(Continuation {
+                                env: saved,
+                                bind,
+                                next: *next,
+                            });
+                            pc = self.entries[&path];
+                            continue;
+                        }
+                        if let ExprKind::Field(receiver, method) = &f.kind
+                            && method == "set"
+                        {
+                            let Value::Actor(actor) = self.eval(receiver, &s.frames[i].env, s)?
+                            else {
+                                return Err(Error::new(
+                                    value.span,
+                                    "internal: set without an actor capability",
+                                ));
+                            };
+                            let updated = self.eval(&args[0], &s.frames[i].env, s)?;
+                            self.check_value(&updated, value.span)?;
+                            s.actors.insert(actor, updated);
+                            if let Some(name) = bind {
+                                s.frames[i].env.insert(name, Value::Unit);
+                            }
+                            pc = *next;
+                            continue;
                         }
                         if let Some((table, method)) = path.rsplit_once('.')
                             && self.tables.contains_key(table)
@@ -678,7 +818,7 @@ impl Program {
         }
         Err(Error::new(
             Span::default(),
-            "internal: handler failed to reach a semantic boundary",
+            "LIMIT: local computation exceeded the actor spike's step budget",
         ))
     }
 }

@@ -102,7 +102,8 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
         assumptions: vec![
             "finite one-shot input workload; unaccepted inputs may remain unaccepted".into(),
             "D1 primary-only; no replication, transport failures, crashes, or unknown commit outcomes".into(),
-            "native worker/D1 slice; unsupported resources and operations are rejected".into(),
+            "actors-v0: stateless and one-instance stateful actors; local steps run to the next external effect; state retention is not durability".into(),
+            "actor-to-actor calls, per-key instances, restarts, queues, and persistence beyond D1 are not modeled".into(),
             "exact state equality; no symmetry or partial-order reduction".into(),
         ],
         states: 0, edges: 0, complete: false, cutoff: None,

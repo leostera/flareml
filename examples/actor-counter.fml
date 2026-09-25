@@ -1,0 +1,30 @@
+// Actor core example: no Cloudflare resource or Worker syntax.
+type Reply = Count(Int)
+
+let increment = (owner: Actor<Int>, amount: Int): Reply {
+  owner.set(owner.state + amount)
+  Count(owner.state)
+}
+
+stateful actor Counter {
+  state: Int = 0
+  add = increment
+}
+
+invariant "counter never exceeds one" {
+  Counter.state <= 1
+}
+
+property "accepted additions eventually return" {
+  forall (r in requests(Counter.add)) { r.accepted leads_to r.completed }
+}
+
+check Concurrent {
+  semantics = "actors-v0"
+  domain Int = 0..2
+  inputs {
+    once Counter.add(1)
+    once Counter.add(1)
+  }
+  fairness { weak runtime.progress }
+}
