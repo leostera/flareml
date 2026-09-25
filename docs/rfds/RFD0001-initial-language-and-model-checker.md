@@ -8,6 +8,7 @@
 - Updated: 2026-09-25
 - Backend Decision: Native Rust checker selected
 - Implementation: Initial Worker/D1 vertical slice; see [current support](../../README.md)
+- Related proposal: [RFD0002](RFD0002-functions-and-actors.md) proposes a generic function/actor core in place of the product-named actor syntax below; this RFD still records the original proposal and checker/resource contracts.
 
 ## Summary
 
