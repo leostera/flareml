@@ -96,6 +96,41 @@ fn artifact_is_saved_and_replayed() {
     }
 }
 #[test]
+fn keyed_actor_trace_roundtrips_through_cli_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = "examples/actor-interleaving.fml";
+    let trace = dir.path().join("keyed.json");
+    let check = fml(&[
+        "check",
+        source,
+        "--format",
+        "json",
+        "--trace-out",
+        trace.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        check.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert_eq!(report["semantics"], "actors-v1");
+    let artifact: serde_json::Value = serde_json::from_slice(&fs::read(&trace).unwrap()).unwrap();
+    assert_eq!(artifact["format_version"], 3);
+    assert!(artifact["states"][0]["keyed_actors"]["Counter"].is_array());
+    let replay = fml(&[
+        "replay",
+        source,
+        trace.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(replay.status.code(), Some(0));
+    let result: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
+    assert_eq!(result["status"], "REPLAY_VALIDATED");
+}
+#[test]
 fn malformed_trace_is_tool_error() {
     let dir = tempfile::tempdir().unwrap();
     let trace = dir.path().join("bad.json");

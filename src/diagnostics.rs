@@ -71,6 +71,16 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
         )
         .unwrap();
     }
+    for (name, instances) in &trace.states[0].keyed_actors {
+        for (key, value) in instances {
+            writeln!(
+                out,
+                "    {} {name}.at({key}).state = {value}",
+                paint("initial", Tone::Dim, color)
+            )
+            .unwrap();
+        }
+    }
     for (name, rows) in &trace.states[0].tables {
         writeln!(
             out,
@@ -120,6 +130,22 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
                     paint(&format!("{actor}.state := {value}"), Tone::Warn, color)
                 )
                 .unwrap();
+            }
+        }
+        for (actor, instances) in &after.keyed_actors {
+            for (key, value) in instances {
+                if before.keyed_actors.get(actor).and_then(|xs| xs.get(key)) != Some(value) {
+                    writeln!(
+                        out,
+                        "        {}",
+                        paint(
+                            &format!("{actor}.at({key}).state := {value}"),
+                            Tone::Warn,
+                            color
+                        )
+                    )
+                    .unwrap();
+                }
             }
         }
         for (table, rows) in &after.tables {

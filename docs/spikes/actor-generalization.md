@@ -2,6 +2,23 @@
 
 Branch: `spike/actor-generalization`, based on the initial `main` checkpoint `327bd44`. This is a **spike**, not a finished replacement for [RFD0001](../rfds/RFD0001-initial-language-and-model-checker.md). No deployable runtime is produced.
 
+## RFD0002 implementation checkpoint (experimental `actors-v1`)
+
+The sections below document the **original `actors-v0` checkpoint**; their "no calls/keyed instances" warnings are historical for that profile. The branch now has a second, opt-in `actors-v1` profile with typed `call(Actor.method, message)`, suspended callers, independently scheduled callee acceptance and reply, and finite keyed stateful actors addressed with `Actor.at(key)`. Keyed input slots use `once Actor.at(key).method(message)`, and read-only specifications use `Actor.at(key).state`. Initial state is eagerly materialized for each finite key. `requests(Actor.method)` still observes only declared external slots. There are runnable passing and failing examples in `examples/actor-keyed.fml`, `examples/actor-call.fml`, and `examples/actor-interleaving.fml`; the same-key interleaving example witnesses a lost update across an actor call. Replay artifacts are now version 3. `actors-v0` and `cf-core-v0` still run, and actor calls/keyed actors are gated to `actors-v1`.
+
+**Still outstanding for RFD0002:** addresses as first-class storable/serializable values, configurable call failure outcomes, restart/eviction/durability semantics, product-specific Worker/DO/Queue adapters, explicit model-level budgets for dynamic call frames, and stronger independent scheduler/capability oracles. The current profile assumes fault-free direct calls, no entire-handler lock, and no persistence guarantee. A cyclic call graph may exhaust the 64-total-frame bound and return `INCONCLUSIVE`; a call is not a Queue delivery. These are intentional omissions printed in CLI/JSON assumptions, not completion of the RFD.
+
+Pickup commands:
+
+```sh
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo run -- check examples/actor-keyed.fml
+cargo run -- check examples/actor-interleaving.fml --trace-out /tmp/interleaving.trace.json # expected exit 1
+cargo run -- replay examples/actor-interleaving.fml /tmp/interleaving.trace.json
+```
+
 ## What works
 
 - Top-level `let name = (typed, parameters): ReturnType { body }` functions; the last expression is the result. Pure functions can call other pure functions, including through a pattern match. Cycles are rejected by an acyclic dependency graph.

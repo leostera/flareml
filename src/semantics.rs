@@ -17,6 +17,7 @@ pub enum Value {
     List(Vec<Value>),
     Request(usize),
     Actor(String),
+    KeyedActor(String, Box<Value>),
     Rows(String),
 }
 impl Value {
@@ -60,6 +61,7 @@ impl std::fmt::Display for Value {
             Self::List(xs) => write!(f, "[{}]", joined(xs)),
             Self::Request(i) => write!(f, "request #{i}"),
             Self::Actor(name) => write!(f, "actor {name}"),
+            Self::KeyedActor(name, key) => write!(f, "actor {name}.at({key})"),
             Self::Rows(n) => write!(f, "{n}.rows"),
         }
     }
@@ -69,6 +71,12 @@ pub type Env = BTreeMap<String, Value>;
 pub enum Phase {
     Unaccepted,
     Ready(usize),
+    Waiting {
+        child: usize,
+        bind: Option<String>,
+        next: usize,
+        pc: usize,
+    },
     Pending {
         table: String,
         method: String,
@@ -87,6 +95,9 @@ pub struct Continuation {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Frame {
+    pub handler: String,
+    pub key: Option<Value>,
+    pub parent: Option<usize>,
     pub input: Value,
     pub env: Env,
     pub phase: Phase,
@@ -96,8 +107,44 @@ pub struct Frame {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct State {
     pub actors: BTreeMap<String, Value>,
+    #[serde(with = "keyed_actor_serde")]
+    pub keyed_actors: BTreeMap<String, BTreeMap<Value, Value>>,
     pub tables: BTreeMap<String, Vec<Value>>,
     pub frames: Vec<Frame>,
+}
+// JSON objects require string keys. Actor identities are typed Values, so encode
+// per-actor state as ordered (identity, state) pairs instead of stringifying keys.
+mod keyed_actor_serde {
+    use super::Value;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<String, BTreeMap<Value, Value>>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        values
+            .iter()
+            .map(|(name, instances)| (name, instances.iter().collect::<Vec<_>>()))
+            .collect::<BTreeMap<_, _>>()
+            .serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<BTreeMap<String, BTreeMap<Value, Value>>, D::Error> {
+        let values = BTreeMap::<String, Vec<(Value, Value)>>::deserialize(deserializer)?;
+        values
+            .into_iter()
+            .map(|(name, entries)| {
+                let count = entries.len();
+                let instances: BTreeMap<_, _> = entries.into_iter().collect();
+                if instances.len() != count {
+                    return Err(D::Error::custom("duplicate keyed actor identity"));
+                }
+                Ok((name, instances))
+            })
+            .collect()
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Action {
@@ -120,9 +167,36 @@ impl Program {
         };
         for actor in self.actors.values() {
             if let Some((_, initial)) = &actor.state {
-                let value = self.eval(initial, &Env::new(), &s)?;
-                self.check_value(&value, initial.span)?;
-                s.actors.insert(actor.name.clone(), value);
+                if let Some((param, ty)) = &actor.key {
+                    let mut keys = self.domain(&ty.name, 0)?;
+                    keys.sort();
+                    keys.dedup();
+                    if keys.is_empty() {
+                        return Err(Error::new(
+                            actor.span,
+                            "LIMIT: actor identity domain is empty or missing",
+                        ));
+                    }
+                    if keys.len() > 4096 {
+                        return Err(Error::new(
+                            actor.span,
+                            "LIMIT: keyed actor domain exceeds 4096 identities",
+                        ));
+                    }
+                    let mut instances = BTreeMap::new();
+                    for key in keys {
+                        self.check_value(&key, actor.span)?;
+                        let value =
+                            self.eval(initial, &Env::from([(param.clone(), key.clone())]), &s)?;
+                        self.check_value(&value, initial.span)?;
+                        instances.insert(key, value);
+                    }
+                    s.keyed_actors.insert(actor.name.clone(), instances);
+                } else {
+                    let value = self.eval(initial, &Env::new(), &s)?;
+                    self.check_value(&value, initial.span)?;
+                    s.actors.insert(actor.name.clone(), value);
+                }
             }
         }
         for (n, xs) in &self.check.init {
@@ -142,9 +216,26 @@ impl Program {
             s.tables.insert(n.clone(), rows);
         }
         for i in &self.check.inputs {
+            let key = i
+                .key
+                .as_ref()
+                .map(|e| self.eval(e, &Env::new(), &s))
+                .transpose()?;
+            if let Some(key) = &key {
+                self.check_value(key, i.span)?;
+                if !s.keyed_actors[&self.handlers[&i.handler].actor].contains_key(key) {
+                    return Err(Error::new(
+                        i.span,
+                        "LIMIT: actor key outside finite identity domain",
+                    ));
+                }
+            }
             let input = self.eval(&i.value, &Env::new(), &s)?;
             self.check_value(&input, i.span)?;
             s.frames.push(Frame {
+                handler: i.handler.clone(),
+                key,
+                parent: None,
                 input,
                 env: Env::new(),
                 phase: Phase::Unaccepted,
@@ -294,6 +385,22 @@ impl Program {
     }
     pub fn eval(&self, e: &Expr, env: &Env, s: &State) -> Result<Value> {
         use ExprKind::*;
+        if let ExprKind::Field(_, field) = &e.kind
+            && field == "state"
+            && let Some((path, Some(key))) = actor_target(e)
+            && let Some(name) = path.strip_suffix(".state")
+            && self.actors.contains_key(name)
+        {
+            let key = self.eval(&key, env, s)?;
+            return s
+                .keyed_actors
+                .get(name)
+                .and_then(|instances| instances.get(&key))
+                .cloned()
+                .ok_or_else(|| {
+                    Error::new(e.span, "LIMIT: actor key outside finite identity domain")
+                });
+        }
         if let Some(actor) = e
             .path()
             .and_then(|path| path.strip_suffix(".state").map(str::to_owned))
@@ -342,6 +449,12 @@ impl Program {
                 Value::Actor(actor) if n == "state" => s
                     .actors
                     .get(&actor)
+                    .cloned()
+                    .ok_or_else(|| Error::new(e.span, "actor capability has no state")),
+                Value::KeyedActor(actor, key) if n == "state" => s
+                    .keyed_actors
+                    .get(&actor)
+                    .and_then(|instances| instances.get(&key))
                     .cloned()
                     .ok_or_else(|| Error::new(e.span, "actor capability has no state")),
                 Value::Record(_, fs) => fs
@@ -610,14 +723,16 @@ impl Program {
         }];
         for (i, frame) in s.frames.iter().enumerate() {
             let mut next = s.clone();
-            let input = &self.check.inputs[i];
-            let h = &self.handlers[&input.handler];
+            let h = &self.handlers[&frame.handler];
             let (description, span, id, fair) = match &frame.phase {
                 Phase::Unaccepted => {
                     let function = &self.functions[&h.function];
                     let mut args = vec![];
                     if self.actors[&h.actor].state.is_some() {
-                        args.push(Value::Actor(h.actor.clone()));
+                        args.push(match &frame.key {
+                            Some(key) => Value::KeyedActor(h.actor.clone(), Box::new(key.clone())),
+                            None => Value::Actor(h.actor.clone()),
+                        });
                     }
                     args.push(frame.input.clone());
                     next.frames[i].env = function
@@ -628,10 +743,14 @@ impl Program {
                         .collect();
                     next.frames[i].phase = Phase::Ready(self.entries[&h.function]);
                     (
-                        format!("accept {}({}) as request #{i}", input.handler, frame.input),
-                        input.span,
+                        format!("accept {}({}) as request #{i}", frame.handler, frame.input),
+                        if frame.parent.is_some() {
+                            h.span
+                        } else {
+                            self.check.inputs[i].span
+                        },
                         format!("accept:{i}"),
-                        false,
+                        frame.parent.is_some() && self.check.fair,
                     )
                 }
                 Phase::Ready(pc) => {
@@ -640,6 +759,40 @@ impl Program {
                         description,
                         span,
                         format!("resume:{i}:{pc}"),
+                        self.check.fair,
+                    )
+                }
+                Phase::Waiting {
+                    child,
+                    bind,
+                    next: pc,
+                    pc: origin,
+                } => {
+                    let callee = &s.frames[*child];
+                    if !matches!(callee.phase, Phase::Done) {
+                        continue;
+                    }
+                    let Value::Variant(tag, values) = &callee.response else {
+                        return Err(Error::new(
+                            self.code[*origin].span,
+                            "internal: missing call response",
+                        ));
+                    };
+                    if tag != "Some" || values.len() != 1 {
+                        return Err(Error::new(
+                            self.code[*origin].span,
+                            "internal: invalid call response",
+                        ));
+                    }
+                    let result = values[0].clone();
+                    if let Some(n) = bind {
+                        next.frames[i].env.insert(n.clone(), result.clone());
+                    }
+                    next.frames[i].phase = Phase::Ready(*pc);
+                    (
+                        format!("request #{i} receives reply {result} from request #{child}"),
+                        self.code[*origin].span,
+                        format!("reply:{i}:{child}:{origin}"),
                         self.check.fair,
                     )
                 }
@@ -733,6 +886,60 @@ impl Program {
                     };
                     if let ExprKind::Call(f, args) = &value.kind {
                         let path = f.path().unwrap_or_default();
+                        if path == "call" {
+                            let (handler, key_expr) =
+                                actor_target(&args[0]).expect("checked call target");
+                            let key = key_expr
+                                .as_ref()
+                                .map(|e| self.eval(e, &s.frames[i].env, s))
+                                .transpose()?;
+                            if let Some(key) = &key {
+                                self.check_value(key, value.span)?;
+                                if !s.keyed_actors[&self.handlers[&handler].actor].contains_key(key)
+                                {
+                                    return Err(Error::new(
+                                        value.span,
+                                        "LIMIT: actor key outside finite identity domain",
+                                    ));
+                                }
+                            }
+                            let message = self.eval(&args[1], &s.frames[i].env, s)?;
+                            self.check_value(&message, value.span)?;
+                            if s.frames.len() >= 64 {
+                                return Err(Error::new(
+                                    value.span,
+                                    "LIMIT: actor call frame capacity (64 total frames)",
+                                ));
+                            }
+                            let child = s.frames.len();
+                            s.frames.push(Frame {
+                                handler: handler.clone(),
+                                key: key.clone(),
+                                parent: Some(i),
+                                input: message.clone(),
+                                env: Env::new(),
+                                phase: Phase::Unaccepted,
+                                response: Value::none(),
+                                stack: vec![],
+                            });
+                            s.frames[i].phase = Phase::Waiting {
+                                child,
+                                bind,
+                                next: *next,
+                                pc,
+                            };
+                            return Ok((
+                                format!(
+                                    "request #{i} calls {}({message}) as request #{child}",
+                                    key.map_or(handler.clone(), |key| format!(
+                                        "{}.at({key}).{}",
+                                        self.handlers[&handler].actor,
+                                        handler.rsplit('.').next().unwrap_or_default()
+                                    ))
+                                ),
+                                value.span,
+                            ));
+                        }
                         if let Some(function) = self.functions.get(&path)
                             && self.effects[&path].suspends_or_writes()
                         {
@@ -761,16 +968,26 @@ impl Program {
                         if let ExprKind::Field(receiver, method) = &f.kind
                             && method == "set"
                         {
-                            let Value::Actor(actor) = self.eval(receiver, &s.frames[i].env, s)?
-                            else {
-                                return Err(Error::new(
-                                    value.span,
-                                    "internal: set without an actor capability",
-                                ));
-                            };
+                            let capability = self.eval(receiver, &s.frames[i].env, s)?;
                             let updated = self.eval(&args[0], &s.frames[i].env, s)?;
                             self.check_value(&updated, value.span)?;
-                            s.actors.insert(actor, updated);
+                            match capability {
+                                Value::Actor(actor) => {
+                                    s.actors.insert(actor, updated);
+                                }
+                                Value::KeyedActor(actor, key) => {
+                                    s.keyed_actors
+                                        .get_mut(&actor)
+                                        .expect("validated actor")
+                                        .insert(*key, updated);
+                                }
+                                _ => {
+                                    return Err(Error::new(
+                                        value.span,
+                                        "internal: set without an actor capability",
+                                    ));
+                                }
+                            }
                             if let Some(name) = bind {
                                 s.frames[i].env.insert(name, Value::Unit);
                             }

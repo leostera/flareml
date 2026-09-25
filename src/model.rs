@@ -116,10 +116,10 @@ impl Program {
             ));
         }
         .clone();
-        if !["actors-v0", "cf-core-v0"].contains(&check.semantics.as_str()) {
+        if !["actors-v0", "actors-v1", "cf-core-v0"].contains(&check.semantics.as_str()) {
             return Err(Error::new(
                 check.span,
-                "unsupported semantics; new actor models use \"actors-v0\"",
+                "unsupported semantics; actor models use \"actors-v0\" or \"actors-v1\"",
             ));
         }
         if check.semantics == "cf-core-v0"
@@ -289,6 +289,29 @@ impl Program {
             }
         }
         for i in &p.check.inputs {
+            let actor = i.handler.split('.').next().and_then(|n| p.actors.get(n));
+            match (actor.and_then(|a| a.key.as_ref()), i.key.as_ref()) {
+                (Some((_, ty)), Some(key)) => {
+                    if p.check.semantics != "actors-v1" {
+                        return Err(Error::new(i.span, "keyed actors require actors-v1"));
+                    }
+                    let actual = p.type_expr(key, &env, None, false, false)?;
+                    p.require(&p.resolve(ty, key.span)?, &actual, key.span)?;
+                }
+                (Some(_), None) => {
+                    return Err(Error::new(
+                        i.span,
+                        "keyed actor input requires Actor.at(key).method",
+                    ));
+                }
+                (None, Some(_)) => {
+                    return Err(Error::new(
+                        i.span,
+                        "only keyed actors accept Actor.at(key).method",
+                    ));
+                }
+                _ => {}
+            }
             let h = p
                 .handlers
                 .get(&i.handler)
@@ -297,8 +320,15 @@ impl Program {
             p.require(&p.resolve(&h.input, h.span)?, &actual, i.span)?;
         }
         for actor in p.actors.values() {
+            if actor.key.is_some() && p.check.semantics != "actors-v1" {
+                return Err(Error::new(actor.span, "keyed actors require actors-v1"));
+            }
             if let Some((ty, initial)) = &actor.state {
-                let actual = p.type_expr(initial, &env, None, false, false)?;
+                let mut init_env = env.clone();
+                if let Some((name, key_ty)) = &actor.key {
+                    init_env.insert(name.clone(), p.resolve(key_ty, actor.span)?);
+                }
+                let actual = p.type_expr(initial, &init_env, None, false, false)?;
                 p.require(&p.resolve(ty, initial.span)?, &actual, initial.span)?;
             }
         }
@@ -554,6 +584,29 @@ impl Program {
     ) -> Result<Ty> {
         let pure = |e: &Expr| self.type_expr(e, env, output, property, false);
         let boolty = Ty::named("Bool");
+        if let ExprKind::Field(_, field) = &e.kind
+            && field == "state"
+            && let Some((path, Some(key))) = actor_target(e)
+            && let Some(name) = path.strip_suffix(".state")
+            && let Some(actor) = self.actors.get(name)
+        {
+            if !property {
+                return Err(Error::new(
+                    e.span,
+                    "actor state inspection is property-only",
+                ));
+            }
+            let (_, key_ty) = actor
+                .key
+                .as_ref()
+                .ok_or_else(|| Error::new(e.span, "actor is not keyed"))?;
+            self.require(&self.resolve(key_ty, key.span)?, &pure(&key)?, key.span)?;
+            let (ty, _) = actor
+                .state
+                .as_ref()
+                .ok_or_else(|| Error::new(e.span, "stateless actors have no state"))?;
+            return self.resolve(ty, e.span);
+        }
         if let Some(actor) = e
             .path()
             .and_then(|path| path.strip_suffix(".state").and_then(|n| self.actors.get(n)))
@@ -681,10 +734,48 @@ impl Program {
                     return self.resolve(&function.output, e.span);
                 }
                 if path == "call" {
-                    return Err(Error::new(
-                        e.span,
-                        "actor-to-actor call is not implemented in this checkpoint; drive actors through check inputs for now",
-                    ));
+                    if self.check.semantics != "actors-v1" {
+                        return Err(Error::new(
+                            e.span,
+                            "actor calls require the actors-v1 profile",
+                        ));
+                    }
+                    if property || !effect || args.len() != 2 {
+                        return Err(Error::new(
+                            e.span,
+                            "call(handler, message) must be a direct handler statement or let binding",
+                        ));
+                    }
+                    let (target, key) = actor_target(&args[0]).ok_or_else(|| {
+                        Error::new(args[0].span, "call requires a known actor handler")
+                    })?;
+                    let handler = self.handlers.get(&target).ok_or_else(|| {
+                        Error::new(args[0].span, "call requires a known actor handler")
+                    })?;
+                    match (self.actors[&handler.actor].key.as_ref(), key.as_ref()) {
+                        (Some((_, ty)), Some(k)) => {
+                            self.require(&self.resolve(ty, k.span)?, &pure(k)?, k.span)?;
+                        }
+                        (Some(_), None) => {
+                            return Err(Error::new(
+                                args[0].span,
+                                "keyed call requires Actor.at(key).method",
+                            ));
+                        }
+                        (None, Some(_)) => {
+                            return Err(Error::new(
+                                args[0].span,
+                                "only keyed actors accept Actor.at(key).method",
+                            ));
+                        }
+                        _ => {}
+                    }
+                    self.require(
+                        &self.resolve(&handler.input, e.span)?,
+                        &pure(&args[1])?,
+                        args[1].span,
+                    )?;
+                    return self.resolve(&handler.output, e.span);
                 }
                 if path == "requests" {
                     if !property || args.len() != 1 {

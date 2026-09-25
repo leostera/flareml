@@ -6,7 +6,7 @@
 - Author: leostera, with AI assistance
 - Start Date: 2026-09-26
 - Updated: 2026-09-26
-- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization`
+- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` (`actors-v1` vertical slice; proposal not fully implemented)
 
 ## Summary
 
@@ -16,7 +16,7 @@ Make typed functions and actors the general modeling core of FML. Functions desc
 
 RFD0001 starts from a Cloudflare-native vocabulary and an initial Worker/D1 implementation. The [first checkpoint](../../README.md) checks real `.fml` source and catches a login bug and a D1 lost update. But declaring every handler inside `worker` or `durable` entangles the *behavior being modeled* with its *execution environment*. This makes reuse, ordinary pure functions, and non-Cloudflare systems awkward. It also suggests incorrectly that a named Worker is a long-lived actor, or that a Durable Object handler is atomic end-to-end.
 
-The branch spike has working top-level functions, stateless actors, and single-instance stateful actors. It validates the direction: [`actor-stateless.fml`](../../examples/actor-stateless.fml) checks a reusable decision function without Cloudflare resources; [`actor-counter.fml`](../../examples/actor-counter.fml) finds a state invariant failure and replays it. The spike is **not** yet a general actor calculus: one stateful instance per name, no inter-actor calls, no address protocol, no restarts or persistence. Its `worker`/`cf-core-v0` parser shim exists to retain old tests, not to determine the eventual public surface.
+The branch spike has working top-level functions, stateless actors, and single-instance stateful actors. It validates the direction: [`actor-stateless.fml`](../../examples/actor-stateless.fml) checks a reusable decision function without Cloudflare resources; [`actor-counter.fml`](../../examples/actor-counter.fml) finds a state invariant failure and replays it. At drafting the spike was **not** yet a general actor calculus: one stateful instance per name, no inter-actor calls, no address protocol, no restarts or persistence. The subsequent `actors-v1` slice adds finite keyed identities and direct fault-free calls, but still has no first-class addresses, restart or persistence semantics. Its `worker`/`cf-core-v0` parser shim exists to retain old tests, not to determine the eventual public surface.
 
 We need a design that makes the boundaries teachable and checkable: what runs locally, who owns state, how actors are addressed, what crosses a message boundary, when another invocation can run, and which properties have actually been established.
 
@@ -116,7 +116,7 @@ check Concurrent {
 
 ### The next vertical example: two actors
 
-The following is **proposed syntax, not accepted by the current parser**. It illustrates what implementation must make checkable rather than assuming `call` is just a local function invocation:
+The following was **proposed syntax when this draft was written**. The branch now accepts the keyed address and call forms under the experimental `actors-v1` profile, without implying that the rest of this RFD is implemented. It illustrates why `call` cannot be treated as a local function invocation:
 
 ```fml
 type AccountId = Alice | Bob
@@ -150,7 +150,7 @@ check Deposits {
 }
 ```
 
-The property is illustrative and intentionally weak; actual acceptance fixtures should assert concrete per-key outcomes and use a cover to avoid vacuity. `Account.at(id)` denotes a stable logical identity and `call` selects a typed handler and carries a serializable message, not an immediate nested Rust call. The version label `actors-v1` is illustrative: it must be allocated only after a precise semantic profile and tests exist. Neither syntax nor profile ID is implemented by the spike.
+The property is illustrative and intentionally weak; actual acceptance fixtures should assert concrete per-key outcomes and use a cover to avoid vacuity. `Account.at(id)` denotes a stable logical identity and `call` selects a typed handler and carries a serializable message, not an immediate nested Rust call. The version label `actors-v1` is now allocated to the branch's fault-free, finite request/reply slice with scheduler and replay tests; it does not imply fault handling, first-class addresses, durability, or a Cloudflare backend. Additional behavior requires new profile contracts and tests.
 
 A useful counterexample should show input acceptance, call issue, target identity, target acceptance, state commit, reply, resumed caller, and the violated predicate with bound IDs. A failed `fml check` is a behavior of the declared finite model and assumptions, **not** proof of a deployed bug.
 
@@ -164,7 +164,7 @@ Maintain three layers:
 2. **Semantic profiles/adapters:** define available resource operations, typed capabilities, message/call failure modes, state persistence, consistency, queue delivery and scheduling rules. Product-specific tables (`d1`), `kv` and `bucket` may remain declarative syntax supplied by a Cloudflare-facing frontend or feature set; this RFD changes the **core actor syntax**, not the proposal for distinct storage semantics.
 3. **Native checker and diagnostics:** the existing typed IR, explicit-state graph, fairness and temporal engines, witnesses and replay. Preserve the checker contract from RFD0001; don't replace it with an unchecked interpreter.
 
-The current Rust modules remain a small single-package codebase. `src/syntax.rs` parses functions and actors; `src/functions.rs` binds functions and infers conservative transitive effects; `src/model.rs` typechecks/lowers; `src/semantics.rs` evaluates and schedules; `src/graph.rs`, `src/temporal.rs`, `src/checker.rs`, and `src/trace.rs` check and validate results. The future separation is a semantic boundary first, not a requirement to publish many crates.
+The Rust modules remain a small single-package codebase. `src/syntax.rs` parses functions and actors; `src/functions.rs` binds functions and infers conservative transitive effects; `src/model.rs` typechecks/lowers; `src/semantics.rs` evaluates and schedules; `src/graph.rs`, `src/temporal.rs`, `src/checker.rs`, and `src/trace.rs` check and validate results. The future separation is a semantic boundary first, not a requirement to publish many crates.
 
 ### Functions, types and capabilities
 
@@ -175,7 +175,7 @@ The current Rust modules remain a small single-package codebase. `src/syntax.rs`
 - A stateless actor binds functions of `(message: Input) -> Reply`; each invocation gets fresh locals. A stateful actor binds `(owner: Actor<State>, message: Input) -> Reply`; state is owned by the identified instance. Other actors do not receive its owner capability.
 - Only supported finite data types may cross a boundary; crossing cannot expose call stack frames, functions/closures or owner capabilities. The typechecker rejects unsupported calls rather than pretending arbitrary expressions serialize.
 
-The current spike permits pure function calls, inferred effects, and one static `Actor<State>` owner, but does not yet enforce all of these rules in a proven general effect/capability system. Treat its implementation as evidence to refine, not proof that the intended discipline is sound.
+The spike has pure function calls, inferred effects, and now singleton/keyed `Actor<State>` owners in `actors-v1`, but does not yet enforce all of these rules in a proven general effect/capability system. Treat its implementation as evidence to refine, not proof that the intended discipline is sound.
 
 ### Identity, state and scheduling
 

@@ -48,7 +48,7 @@ impl Trace {
             trace_states.push(states[g.edges[s][e].to].clone());
         }
         Self {
-            format_version: 2,
+            format_version: 3,
             tool_version: env!("CARGO_PKG_VERSION").into(),
             semantics: p.check.semantics.clone(),
             source_hash: source_hash(source),
@@ -64,7 +64,7 @@ impl Trace {
     }
     pub fn validate(&self, source: &str, p: &Program) -> Result<()> {
         let bad = |s: &str| Error::new(Span::default(), format!("invalid trace: {s}"));
-        if self.format_version != 2 || self.tool_version != env!("CARGO_PKG_VERSION") {
+        if self.format_version != 3 || self.tool_version != env!("CARGO_PKG_VERSION") {
             return Err(bad("unsupported format/tool version"));
         }
         if self.source_hash != source_hash(source)

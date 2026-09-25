@@ -1,5 +1,5 @@
 //! Actor binding and conservative, transitive function effect inference.
-//! Dependencies (including actor calls) must be acyclic in this finite spike.
+//! Local function dependencies must be acyclic; actor calls cross scheduler boundaries.
 use crate::{
     model::{Effects, Program, Ty},
     syntax::*,
@@ -67,6 +67,21 @@ impl Program {
             }
         }
         for actor in self.actors.values() {
+            if let Some((name, ty)) = &actor.key {
+                self.require_data(ty, actor.span, &mut BTreeSet::new())?;
+                if !matches!(self.resolve(ty, actor.span)?, Ty::Named(_)) {
+                    return Err(Error::new(
+                        actor.span,
+                        "actor identity requires a finite named data type",
+                    ));
+                }
+                if self.is_global(name) {
+                    return Err(Error::new(
+                        actor.span,
+                        "actor identity parameter shadows a global name",
+                    ));
+                }
+            }
             let state = actor
                 .state
                 .as_ref()
@@ -166,6 +181,12 @@ impl Program {
             let mut cost = 0usize;
             visit_body(&f.body, &mut |e| {
                 cost += 1;
+                if let ExprKind::Field(_, field) = &e.kind
+                    && field == "state"
+                    && actor_target(e).is_some_and(|(_, key)| key.is_some())
+                {
+                    fx.inspects = true;
+                }
                 if let Some(path) = e.path()
                     && (path
                         .strip_suffix(".rows")
@@ -179,7 +200,7 @@ impl Program {
                 if matches!(e.kind, ExprKind::Quant { .. }) {
                     fx.inspects = true;
                 }
-                if let ExprKind::Call(target, args) = &e.kind {
+                if let ExprKind::Call(target, _args) = &e.kind {
                     let path = target.path().unwrap_or_default();
                     if self.functions.contains_key(&path) {
                         dependencies.push(path.clone());
@@ -189,13 +210,6 @@ impl Program {
                     }
                     if path == "call" {
                         fx.io = true;
-                        if let Some(h) = args
-                            .first()
-                            .and_then(Expr::path)
-                            .and_then(|p| self.handlers.get(&p))
-                        {
-                            dependencies.push(h.function.clone());
-                        }
                     }
                     if let ExprKind::Field(receiver, method) = &target.kind {
                         if method == "set" {
@@ -218,7 +232,7 @@ impl Program {
         let order = petgraph::algo::toposort(&graph, None).map_err(|cycle| {
             Error::new(
                 self.functions[&graph[cycle.node_id()]].span,
-                "recursive function/actor call cycle is unsupported in this finite spike",
+                "recursive local function call cycle is unsupported",
             )
         })?;
         let mut costs = BTreeMap::<String, usize>::new();

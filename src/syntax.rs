@@ -78,6 +78,31 @@ impl Expr {
         }
     }
 }
+/// A handler selector, optionally through a keyed actor address.
+pub fn actor_target(e: &Expr) -> Option<(String, Option<Expr>)> {
+    if let Some(path) = e.path() {
+        return Some((path, None));
+    }
+    let ExprKind::Field(address, method) = &e.kind else {
+        return None;
+    };
+    let ExprKind::Call(at, keys) = &address.kind else {
+        return None;
+    };
+    if keys.len() != 1 {
+        return None;
+    }
+    let ExprKind::Field(actor, name) = &at.kind else {
+        return None;
+    };
+    if name != "at" {
+        return None;
+    }
+    let ExprKind::Name(actor) = &actor.kind else {
+        return None;
+    };
+    Some((format!("{actor}.{method}"), Some(keys[0].clone())))
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Type {
     pub name: String,
@@ -144,6 +169,8 @@ pub struct Function {
 #[derive(Clone, Debug)]
 pub struct Actor {
     pub name: String,
+    /// A finite, typed identity domain; absent for singleton actors.
+    pub key: Option<(String, Type)>,
     /// Owned state is retained between invocations; this does not imply durability.
     pub state: Option<(Type, Expr)>,
     pub handlers: BTreeMap<String, String>,
@@ -174,6 +201,7 @@ pub struct Claim {
 #[derive(Clone, Debug)]
 pub struct Input {
     pub handler: String,
+    pub key: Option<Expr>,
     pub value: Expr,
     pub span: Span,
 }
@@ -677,6 +705,18 @@ impl Parser {
                 let stateful = self.take().text == "stateful";
                 self.expect("actor")?;
                 let name = self.name()?;
+                let key = if self.eat("(") {
+                    let param = self.name()?;
+                    self.expect(":")?;
+                    let ty = self.ty()?;
+                    self.expect(")")?;
+                    if !stateful {
+                        return self.err("only stateful actors can have keyed identity");
+                    }
+                    Some((param, ty))
+                } else {
+                    None
+                };
                 self.expect("{")?;
                 let mut state = None;
                 let mut handlers = BTreeMap::new();
@@ -707,6 +747,7 @@ impl Parser {
                 }
                 m.actors.push(Actor {
                     name,
+                    key,
                     state,
                     handlers,
                     span,
@@ -745,6 +786,7 @@ impl Parser {
                 }
                 m.actors.push(Actor {
                     name,
+                    key: None,
                     state: None,
                     handlers: bindings,
                     span,
@@ -841,13 +883,23 @@ impl Parser {
                             while !self.eat("}") {
                                 self.expect("once")?;
                                 let span = self.token().span;
-                                let handler = self.path()?;
-                                self.expect("(")?;
-                                let value = self.expr(0)?;
-                                self.expect(")")?;
+                                let request = self.expr(0)?;
+                                let ExprKind::Call(target, mut args) = request.kind else {
+                                    return self.err("input requires a handler call");
+                                };
+                                if args.len() != 1 {
+                                    return self.err("input requires exactly one message");
+                                }
+                                let (handler, key) = actor_target(&target).ok_or_else(|| {
+                                    Error::new(
+                                        span,
+                                        "input requires Actor.method or Actor.at(key).method",
+                                    )
+                                })?;
                                 c.inputs.push(Input {
                                     handler,
-                                    value,
+                                    key,
+                                    value: args.remove(0),
                                     span,
                                 });
                             }

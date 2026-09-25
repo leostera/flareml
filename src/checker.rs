@@ -98,22 +98,54 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
         .collect();
     let mut report = Report {
         status: Status::Inconclusive,
-        check: p.check.name.clone(), semantics: p.check.semantics.clone(), weak_progress: p.check.fair,
+        check: p.check.name.clone(),
+        semantics: p.check.semantics.clone(),
+        weak_progress: p.check.fair,
         assumptions: vec![
             "finite one-shot input workload; unaccepted inputs may remain unaccepted".into(),
-            "D1 primary-only; no replication, transport failures, crashes, or unknown commit outcomes".into(),
-            "actors-v0: stateless and one-instance stateful actors; local steps run to the next external effect; state retention is not durability".into(),
-            "actor-to-actor calls, per-key instances, restarts, queues, and persistence beyond D1 are not modeled".into(),
+            if p.tables.is_empty() {
+                "no D1 tables selected; external resource failures, crashes, and unknown commit outcomes are not modeled".into()
+            } else {
+                "D1 primary-only; no replication, transport failures, crashes, or unknown commit outcomes".into()
+            },
+            if p.check.semantics == "actors-v1" {
+                "actors-v1: finite keyed state and direct typed request/reply; callers suspend across calls; local steps run to the next external effect; state retention is not durability".into()
+            } else {
+                "actors-v0: stateless and one-instance stateful actors; local steps run to the next external effect; state retention is not durability".into()
+            },
+            if p.check.semantics == "actors-v1" {
+                "actor calls assume eventual fault-free delivery when weak progress is declared; transport failures, timeouts, restarts, queues and persistence beyond D1 are not modeled".into()
+            } else {
+                "actor-to-actor calls, per-key instances, restarts, queues, and persistence beyond D1 are not modeled".into()
+            },
             "exact state equality; no symmetry or partial-order reduction".into(),
         ],
-        states: 0, edges: 0, complete: false, cutoff: None,
-        claims: claims.iter().map(|c| ClaimResult {
-            name: c.name.clone(), kind: c.kind.clone(), result: "INCONCLUSIVE".into(),
-            span: c.span, note: None, witness: None,
-        }).collect(),
-        max_states: options.max_states, max_depth: options.max_depth,
-        timeout_ms: options.timeout.as_millis(), input_slots: p.check.inputs.len(),
-        not_checked: p.model.claims.iter().filter(|c| options.property.as_ref().is_some_and(|n| n != &c.name)).map(|c| c.name.clone()).collect(),
+        states: 0,
+        edges: 0,
+        complete: false,
+        cutoff: None,
+        claims: claims
+            .iter()
+            .map(|c| ClaimResult {
+                name: c.name.clone(),
+                kind: c.kind.clone(),
+                result: "INCONCLUSIVE".into(),
+                span: c.span,
+                note: None,
+                witness: None,
+            })
+            .collect(),
+        max_states: options.max_states,
+        max_depth: options.max_depth,
+        timeout_ms: options.timeout.as_millis(),
+        input_slots: p.check.inputs.len(),
+        not_checked: p
+            .model
+            .claims
+            .iter()
+            .filter(|c| options.property.as_ref().is_some_and(|n| n != &c.name))
+            .map(|c| c.name.clone())
+            .collect(),
     };
     let mut states = vec![initial.clone()];
     let mut intern = HashMap::from([(initial, 0usize)]);

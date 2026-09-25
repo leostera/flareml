@@ -4,6 +4,9 @@ use flareml::{
 };
 const STATELESS: &str = include_str!("../examples/actor-stateless.fml");
 const STATEFUL: &str = include_str!("../examples/actor-counter.fml");
+const CALL: &str = include_str!("../examples/actor-call.fml");
+const KEYED: &str = include_str!("../examples/actor-keyed.fml");
+const INTERLEAVING: &str = include_str!("../examples/actor-interleaving.fml");
 fn run(source: &str) -> checker::Report {
     let p = compile(source, None).unwrap();
     checker::check(source, &p, &Options::default()).unwrap()
@@ -68,12 +71,187 @@ fn inspector_function_cannot_be_bound_as_handler() {
     assert!(compile(&source, None).is_err());
 }
 #[test]
-fn cross_actor_call_is_rejected_until_semantics_exist() {
+fn actor_call_requires_v1_profile() {
     let source = STATELESS.replace(
         "decision(request.eligible)",
         "call(API.handle_request, request)",
     );
-    assert!(compile(&source, None).is_err()); // recursive or unsupported; never silently checked
+    assert!(
+        compile(&source, None)
+            .unwrap_err()
+            .message
+            .contains("actors-v1")
+    );
+}
+#[test]
+fn actor_calls_suspend_resume_and_replay() {
+    let p = compile(CALL, None).unwrap();
+    let report = run(CALL);
+    assert_eq!(report.status, Status::Violated);
+    let witness = report.witness().unwrap();
+    assert!(
+        witness
+            .actions
+            .iter()
+            .any(|a| a.description.contains("calls Counter.add"))
+    );
+    assert!(
+        witness
+            .actions
+            .iter()
+            .any(|a| a.description.contains("accept Counter.add"))
+    );
+    witness.validate(CALL, &p).unwrap();
+    assert_eq!(witness.format_version, 3);
+    let mut previous = witness.clone();
+    previous.format_version = 2;
+    assert!(
+        previous
+            .validate(CALL, &p)
+            .unwrap_err()
+            .message
+            .contains("unsupported format")
+    );
+}
+#[test]
+fn actor_call_returns_under_weak_fairness() {
+    let source = CALL.replace("once API.add(1) once API.add(1)", "once API.add(1)");
+    assert_eq!(run(&source).status, Status::VerifiedInScope);
+}
+#[test]
+fn actor_call_is_typed_and_profile_gated() {
+    let source = CALL.replace("call(Counter.add, amount)", "call(Counter.add, Count(1))");
+    assert!(
+        compile(&source, None)
+            .unwrap_err()
+            .message
+            .contains("type mismatch")
+    );
+    let source = CALL.replace("actors-v1", "actors-v0");
+    assert!(
+        compile(&source, None)
+            .unwrap_err()
+            .message
+            .contains("actors-v1")
+    );
+}
+#[test]
+fn keyed_instances_are_isolated_and_replayable() {
+    let p = compile(KEYED, None).unwrap();
+    let report = run(KEYED);
+    assert_eq!(report.status, Status::VerifiedInScope);
+    let initial = p.initial().unwrap();
+    assert_eq!(initial.keyed_actors["Account"].len(), 2);
+    assert!(
+        initial.keyed_actors["Account"]
+            .values()
+            .all(|v| *v == flareml::semantics::Value::Int(0))
+    );
+    let source = KEYED.replace(
+        "once API.deposit(Alice) once API.deposit(Bob)",
+        "once API.deposit(Alice) once API.deposit(Alice)",
+    );
+    let p = compile(&source, None).unwrap();
+    let report = run(&source);
+    assert_eq!(report.status, Status::Violated);
+    let witness = report.witness().unwrap();
+    assert!(
+        witness
+            .actions
+            .iter()
+            .any(|a| a.description.contains("Account.at(Alice).deposit"))
+    );
+    witness.validate(&source, &p).unwrap();
+    let encoded = serde_json::to_string(witness).unwrap();
+    let decoded: flareml::trace::Trace = serde_json::from_str(&encoded).unwrap();
+    decoded.validate(&source, &p).unwrap();
+    let last = witness.states.last().unwrap();
+    use flareml::semantics::Value;
+    assert_eq!(
+        last.keyed_actors["Account"][&Value::Variant("Alice".into(), vec![])],
+        Value::Int(2)
+    );
+    assert_eq!(
+        last.keyed_actors["Account"][&Value::Variant("Bob".into(), vec![])],
+        Value::Int(0)
+    );
+}
+#[test]
+fn keyed_identity_is_typed_and_profile_gated() {
+    assert!(
+        compile(&KEYED.replace("Account.at(id)", "Account.at(1)"), None)
+            .unwrap_err()
+            .message
+            .contains("type mismatch")
+    );
+    assert!(
+        compile(&KEYED.replace("actors-v1", "actors-v0"), None)
+            .unwrap_err()
+            .message
+            .contains("actors-v1")
+    );
+    assert!(
+        compile(
+            &KEYED.replace(
+                "call(Account.at(id).deposit, 1)",
+                "call(Account.deposit, 1)"
+            ),
+            None
+        )
+        .unwrap_err()
+        .message
+        .contains("keyed call")
+    );
+}
+#[test]
+fn keyed_direct_input_is_a_distinct_identity() {
+    let source = KEYED.replace(
+        "once API.deposit(Alice) once API.deposit(Bob)",
+        "once Account.at(Alice).deposit(1)",
+    );
+    let p = compile(&source, None).unwrap();
+    let report = run(&source);
+    assert_eq!(report.status, Status::VerifiedInScope);
+    assert_eq!(
+        p.initial().unwrap().frames[0].key,
+        Some(flareml::semantics::Value::Variant("Alice".into(), vec![]))
+    );
+    let bad = source.replace("Account.at(Alice).deposit(1)", "Account.deposit(1)");
+    assert!(
+        compile(&bad, None)
+            .unwrap_err()
+            .message
+            .contains("keyed actor input")
+    );
+}
+#[test]
+fn cyclic_actor_calls_are_bounded_not_mistaken_for_local_recursion() {
+    let source = CALL
+        .replace("call(Counter.add, amount)", "call(API.add, amount)")
+        .replace("once API.add(1) once API.add(1)", "once API.add(1)");
+    let p = compile(&source, None).unwrap();
+    let report = checker::check(&source, &p, &Options::default()).unwrap();
+    assert_eq!(report.status, Status::Inconclusive);
+    assert!(
+        report
+            .cutoff
+            .as_deref()
+            .unwrap_or_default()
+            .contains("actor call")
+    );
+}
+#[test]
+fn same_key_interleaves_while_calling_another_actor() {
+    let p = compile(INTERLEAVING, None).unwrap();
+    let report = run(INTERLEAVING);
+    assert_eq!(report.status, Status::Violated);
+    let witness = report.witness().unwrap();
+    witness.validate(INTERLEAVING, &p).unwrap();
+    assert_eq!(
+        witness.states.last().unwrap().keyed_actors["Counter"]
+            [&flareml::semantics::Value::Variant("Shared".into(), vec![])],
+        flareml::semantics::Value::Int(1)
+    );
 }
 #[test]
 fn actor_models_do_not_claim_legacy_profile() {
