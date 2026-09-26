@@ -1,10 +1,10 @@
 # Actor generalization — checkpoint / pickup notes
 
-Branch: `spike/actor-generalization`, based on the initial `main` checkpoint `327bd44`. This is a **spike**, not a finished replacement for [RFD0001](../rfds/RFD0001-initial-language-and-model-checker.md). No deployable runtime is produced.
+Branch: `spike/actor-generalization`, based on the initial `main` checkpoint `327bd44`. This is a **spike**, not a finished replacement for [RFD0001](../rfds/RFD0001-initial-language-and-model-checker.md). No deployable runtime is produced. Actors are the computational abstraction, not a deployment category; runnable examples are named after their scenarios in the [example guide](../../examples/README.md). Historical profile boundaries below are preserved.
 
 ## New asynchronous checkpoint (experimental `actors-v2`)
 
-[RFD0002](../rfds/RFD0002-functions-and-actors.md) proposes one `actor` declaration, typed `init(id) -> state`, state-in/state-out `handle_message`, and one-way typed `send` with explicit reply addresses and correlation IDs. A **fault-free, finite slice is now implemented** as a distinct `actors-v2` profile. See [`examples/actor-messages.fml`](../../examples/actor-messages.fml), `src/messaging.rs`, and `tests/messaging.rs`. Per-address FIFO mailboxes, optional one-shot external submission, atomic handler state/outbox commit, source-ordered staged sends (including from helpers), state predicates, fairness for enabled processing, replay, and explicit per-address `mailbox_bound` are implemented. Exhausting the bound is `INCONCLUSIVE`; v2 traces now use format **5** (v0/v1 remain 3; old v2 format 4 is rejected).
+[RFD0002](../rfds/RFD0002-functions-and-actors.md) proposes one `actor` declaration, typed `init(id) -> state`, state-in/state-out `handle_message`, and one-way typed `send` with explicit reply addresses and correlation IDs. A **fault-free, finite slice is now implemented** as a distinct `actors-v2` profile. See [`examples/counter-replies.fml`](../../examples/counter-replies.fml), `src/messaging.rs`, and `tests/messaging.rs`. Per-address FIFO mailboxes, optional one-shot external submission, atomic handler state/outbox commit, source-ordered staged sends (including from helpers), state predicates, fairness for enabled processing, replay, and explicit per-address `mailbox_bound` are implemented. Exhausting the bound is `INCONCLUSIVE`; v2 traces now use format **5** (v0/v1 remain 3; old v2 format 4 is rejected).
 
 **Generic-core follow-through:** `inputs(Actor)` now provides typed external-slot submission/processing observations. `messages(Actor)` observes later generated sends with `message_bound = N` lifetime slots per actor declaration; slots are never reused, and exhaustion is inconclusive. This avoids the empty-initial-quantifier bug. `src/observations.rs` implements the views and enqueue accounting. `tests/messaging_oracle.rs` compares all transitions/cutoffs against an independent two-actor FIFO machine; `tests/message_observations.rs` tests fair/unfair progress, identical payloads, non-reused identities, missing replies and replay. `tests/actor_hardening.rs` covers ownership/effect rejection, data/call/evaluation bounds and domain escapes.
 
@@ -13,14 +13,14 @@ Branch: `spike/actor-generalization`, based on the initial `main` checkpoint `32
 Pickup commands for v2:
 
 ```sh
-cargo run -- check examples/actor-messages.fml --trace-out /tmp/actor-messages.trace.json
-cargo run -- replay examples/actor-messages.fml /tmp/actor-messages.trace.json
+cargo run -- check examples/counter-replies.fml --trace-out /tmp/counter-replies.trace.json
+cargo run -- replay examples/counter-replies.fml /tmp/counter-replies.trace.json
 cargo test --locked --test messaging
 ```
 
 ## Earlier RFD0002 implementation checkpoint (experimental `actors-v1`)
 
-The sections below document the **original `actors-v0` checkpoint**; their "no calls/keyed instances" warnings are historical for that profile. The branch now has a second, opt-in `actors-v1` profile with typed `call(Actor.method, message)`, suspended callers, independently scheduled callee acceptance and reply, and finite keyed stateful actors addressed with `Actor.at(key)`. `Address<ActorName>` values can now be stored, sent, and used as `call(address.method, message)` without exposing the `Actor<State>` owner capability. Keyed input slots use `once Actor.at(key).method(message)`, and read-only specifications use `Actor.at(key).state`. Initial state is eagerly materialized for each finite key. `requests(Actor.method)` still observes only declared external slots. There are runnable passing and failing examples in `examples/actor-keyed.fml`, `examples/actor-address.fml`, `examples/actor-call.fml`, and `examples/actor-interleaving.fml`; the same-key interleaving example witnesses a lost update across an actor call. Replay artifacts are now version 3. `actors-v0` and `cf-core-v0` still run, and actor calls/keyed actors are gated to `actors-v1`.
+The sections below document the **original `actors-v0` checkpoint**; their "no calls/keyed instances" warnings are historical for that profile. The branch now has a second, opt-in `actors-v1` profile with typed `call(Actor.method, message)`, suspended callers, independently scheduled callee acceptance and reply, and finite keyed stateful actors addressed with `Actor.at(key)`. `Address<ActorName>` values can now be stored, sent, and used as `call(address.method, message)` without exposing the `Actor<State>` owner capability. Keyed input slots use `once Actor.at(key).method(message)`, and read-only specifications use `Actor.at(key).state`. Initial state is eagerly materialized for each finite key. `requests(Actor.method)` still observes only declared external slots. There are runnable passing and failing examples in `examples/isolated-accounts.fml`, `examples/routed-deposits.fml`, `examples/forwarded-counter.fml`, and `examples/lost-update-across-call.fml`; the same-key interleaving example witnesses a lost update across an actor call. Replay artifacts are now version 3. `actors-v0` and `cf-core-v0` still run, and actor calls/keyed actors are gated to `actors-v1`.
 
 **Still outstanding for RFD0002:** configurable call failure outcomes, restart/eviction/durability semantics, product-specific Worker/DO/Queue adapters, explicit model-level budgets for dynamic call frames, and stronger independent scheduler/capability oracles. The current profile assumes fault-free direct calls, no entire-handler lock, and no persistence guarantee. A cyclic call graph may exhaust the 64-total-frame bound and return `INCONCLUSIVE`; a call is not a Queue delivery. These are intentional omissions printed in CLI/JSON assumptions, not completion of the RFD.
 
@@ -30,16 +30,16 @@ Pickup commands:
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo run -- check examples/actor-keyed.fml
-cargo run -- check examples/actor-interleaving.fml --trace-out /tmp/interleaving.trace.json # expected exit 1
-cargo run -- replay examples/actor-interleaving.fml /tmp/interleaving.trace.json
+cargo run -- check examples/isolated-accounts.fml
+cargo run -- check examples/lost-update-across-call.fml --trace-out /tmp/interleaving.trace.json # expected exit 1
+cargo run -- replay examples/lost-update-across-call.fml /tmp/interleaving.trace.json
 ```
 
 ## What works
 
 - Top-level `let name = (typed, parameters): ReturnType { body }` functions; the last expression is the result. Pure functions can call other pure functions, including through a pattern match. Cycles are rejected by an acyclic dependency graph.
-- `stateless actor Name { handler = function }` accepts a single-argument function. Each input has its own invocation frame. See [`examples/actor-stateless.fml`](../../examples/actor-stateless.fml).
-- `stateful actor Name { state: Type = initial; handler = function }` accepts functions with `(owner: Actor<Type>, message: Input)`. Only the actor handler receives this state capability. `owner.state` reads and `owner.set(value)` writes the actor's owned state; the example demonstrates persistence between requests and a checked failure. See [`examples/actor-counter.fml`](../../examples/actor-counter.fml).
+- `stateless actor Name { handler = function }` accepts a single-argument function. Each input has its own invocation frame. See [`examples/eligibility-check.fml`](../../examples/eligibility-check.fml).
+- `stateful actor Name { state: Type = initial; handler = function }` accepts functions with `(owner: Actor<Type>, message: Input)`. Only the actor handler receives this state capability. `owner.state` reads and `owner.set(value)` writes the actor's owned state; the example demonstrates persistence between requests and a checked failure. See [`examples/counter-bound.fml`](../../examples/counter-bound.fml).
 - The actor core works without any D1/Cloudflare declaration; existing D1 effect boundaries, invariants, temporal properties, explicit weak fairness, and validated replay remain operational. The profile ID for new models is `actors-v0`; old `cf-core-v0` example models continue to work via a transitional `worker` parser shim that converts handler bodies and `respond(value)` into functions and stateless actors. New functions/actors with the old profile are rejected. Replay artifacts now use format version 2 because actor state and function frames change their structure; old artifacts are refused rather than reinterpreted.
 - The checker still uses `requests(Actor.method)` and `once Actor.method(value)`, so the example traces exercise actual actor entrypoints, not arbitrary Rust fixtures. Tests in `tests/actors.rs` exercise both actor types and error cases.
 
@@ -55,7 +55,7 @@ cargo run -- replay examples/actor-interleaving.fml /tmp/interleaving.trace.json
 
 ## Where to continue
 
-1. Run `cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked` and exercise both new examples via `cargo run -- check examples/actor-*.fml`. Buggy `actor-counter.fml` exits 1 by design. Replay its trace with `--trace-out /tmp/actor.trace.json` and `fml replay examples/actor-counter.fml /tmp/actor.trace.json`.
+1. Run `cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked`. Check the original examples individually: `cargo run -- check examples/eligibility-check.fml` and `cargo run -- check examples/counter-bound.fml` (the latter exits 1 by design). Save its witness with `--trace-out /tmp/counter-bound.trace.json` and replay with `fml replay examples/counter-bound.fml /tmp/counter-bound.trace.json`.
 2. Design a typed actor address and call protocol: keyed instance identity; suspended caller continuation; message/reply serialization; concurrency within one keyed actor vs across actors; fairness and failure choices. Add safety and liveness fixtures **before** claiming RPC support.
 3. Split a general model core (functions, actors, owned state, actions, properties) from optional semantics packages (Cloudflare Worker/DO/Queues/D1). Today D1 remains a built-in, while the new actors are generic. Preserve distinct resource semantics.
 4. Move pure evaluation away from recursively reinterpreting `Stmt` blocks if expression or program size grows. The current recursion is guarded by source nesting and acyclic function dependency/cost checks but should gain fuzz coverage for deeply nested pure calls, and source spans for nested calls should identify the actual call site.

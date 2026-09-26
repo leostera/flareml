@@ -1,4 +1,5 @@
-// Ordinary functions can be reused without being actor handlers.
+// An eligibility policy shared by a login handler: ineligible users are denied.
+// Historical actors-v0 syntax; no database or deployment runtime is assumed.
 type Eligibility = Eligible | Ineligible
 type Request = Request { eligible: Eligibility }
 type Reply = Allowed | Denied

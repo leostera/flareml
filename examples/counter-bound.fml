@@ -1,4 +1,5 @@
-// Actor core example: no Cloudflare resource or Worker syntax.
+// Two additions violate a counter bound of one (expected counterexample).
+// Historical actors-v0 profile: state is retained in the model, not durable.
 type Reply = Count(Int)
 
 let increment = (owner: Actor<Int>, amount: Int): Reply {

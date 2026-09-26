@@ -5,7 +5,7 @@ use flareml::{
     trace::Trace,
 };
 
-const REPLIES: &str = include_str!("../examples/actor-messages.fml");
+const REPLIES: &str = include_str!("../examples/counter-replies.fml");
 fn run(source: &str) -> checker::Report {
     checker::check(source, &compile(source, None).unwrap(), &Options::default()).unwrap()
 }
@@ -209,7 +209,7 @@ fn unsent_slot_defaults_and_input_payload_are_explicit() {
 
 #[test]
 fn missing_reply_fixture_exposes_protocol_failure_not_scheduler_starvation() {
-    let source = include_str!("../examples/actor-missing-reply.fml");
+    let source = include_str!("../examples/missing-reply.fml");
     let p = compile(source, None).unwrap();
     let report = run(source);
     assert_eq!(report.status, Status::Violated);

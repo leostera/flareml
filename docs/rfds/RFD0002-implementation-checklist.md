@@ -13,7 +13,7 @@ Authoritative contract: [RFD0002 — Functions and actors as the modeling core](
 - [x] Ordered staged sends, including nested helpers and self-sends. No reply can be processed before its sender commits.
 - [x] Required per-address `mailbox_bound`; explicit cutoff rather than dropping, disabling, or partly committing an overflowing send.
 
-Evidence: [`tests/messaging.rs`](../../tests/messaging.rs), [`tests/actor_hardening.rs`](../../tests/actor_hardening.rs), [`examples/actor-messages.fml`](../../examples/actor-messages.fml).
+Evidence: [`tests/messaging.rs`](../../tests/messaging.rs), [`tests/actor_hardening.rs`](../../tests/actor_hardening.rs), [`examples/counter-replies.fml`](../../examples/counter-replies.fml).
 
 ## Properties, identity, fairness and evidence
 
@@ -56,8 +56,8 @@ Fault/retry/restart, synchronous RPC convenience, arbitrary check-supplied initi
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo run -- check examples/actor-messages.fml --trace-out /tmp/messages.trace.json
-cargo run -- replay examples/actor-messages.fml /tmp/messages.trace.json
+cargo run -- check examples/counter-replies.fml --trace-out /tmp/messages.trace.json
+cargo run -- replay examples/counter-replies.fml /tmp/messages.trace.json
 ```
 
 With a nightly toolchain and `cargo-fuzz` installed, use the existing `source` and `trace_json` targets. Seed `fuzz/corpus/source/` from the examples and `fuzz/corpus/trace_json/` from generated format-5 artifacts. Corpus and artifacts are intentionally gitignored; preserve regression findings as small checked-in tests.

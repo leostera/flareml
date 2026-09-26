@@ -1,4 +1,5 @@
-// One logical instance per AccountId. No persistence or restart is implied.
+// Deposits to Alice and Bob update independent account balances.
+// Historical actors-v1 synchronous calls; no persistence or restart is implied.
 type AccountId = Alice | Bob
 type Reply = Balance(Int)
 

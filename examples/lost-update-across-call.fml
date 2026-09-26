@@ -1,5 +1,6 @@
-// A direct actor call suspends its caller; another invocation of the SAME key
-// can read the old value. The generic actor does not lock an entire handler.
+// Two increments read the same value before a remote call and lose an update.
+// Historical actors-v1 profile: the call suspends its caller and permits another
+// invocation of the SAME key. Unlike actors-v2 message turns, handlers can interleave.
 type Key = Shared
 
 type Reply = Done

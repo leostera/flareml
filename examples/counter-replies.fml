@@ -1,4 +1,6 @@
-// Experimental actors-v2: messages and state transitions are finite, not durable.
+// A counter commits an increment and explicitly sends a correlated reply.
+// The client cannot process the reply before that commit.
+// actors-v2 assumes finite, fault-free mailboxes, not a deployment runtime or durability.
 type CounterId = Main
 type ClientId = User
 type RequestId = First

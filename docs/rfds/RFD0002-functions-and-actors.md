@@ -39,9 +39,15 @@ The desired mental model is closer to an asynchronous receive loop: the actor ow
 
 ## Guide-level explanation
 
+### Actors are a computational abstraction
+
+An actor is a participant in the model, not a choice of deployment technology. Its role might be implemented by an Erlang recursive receive loop, a Cloudflare Worker invocation, a containerized service, or a thread with a mailbox. Functions describe behavior; actors delimit identity, protocols and optional owned state. The implementation's real scheduling, delivery, storage and failure behavior must still match the selected semantic profile: a common actor vocabulary does not make these implementations equivalent. In particular, modeling a Worker invocation as a participant does not give Workers persistent per-actor state or the generic profile's atomic state-and-send commit.
+
+Examples are named for their scenarios—counter replies, missing replies, account isolation and lost updates—not for the `actor` language construct. The [scenario guide](../../examples/README.md) distinguishes current message-based models from older synchronous and resource-specific regression profiles.
+
 ### Actors receive messages and return state
 
-**Working example on the spike branch** (also in [`examples/actor-messages.fml`](../../examples/actor-messages.fml)). Types and addresses are finite, and `send` is not a function that waits for a result:
+**Working example on the spike branch** (also in [`examples/counter-replies.fml`](../../examples/counter-replies.fml)). Types and addresses are finite, and `send` is not a function that waits for a result:
 
 ```fml
 type CounterId = Main
@@ -140,7 +146,7 @@ The initial profile rejects external I/O or suspension within a state-transition
 
 `messages(A)` requires `message_bound = N` and always ranges over **N stable slots**, including at initialization when no sends have occurred. Each slot has `sent`, `processed`, and `external` Boolean fields plus `payload: Option<Message>` and `target: Option<Address<A>>`. Before allocation, flags are false and the optional fields are `None`. Each enqueue allocates the next unused slot for that actor declaration, records immutable payload/target and whether it originated from an external input, and sets `sent`. Its callback commit sets `processed`. Identical payloads sent twice get distinct slots. Slots are never recycled, including after processing: otherwise a temporal binding could silently change identity. Exhaustion is inconclusive, even if every older message finished.
 
-Temporal `forall` expands over these **stable potential slots**, not the messages already present in the initial state. Thus `forall (m in messages(A)) { m.sent leads_to m.processed }` covers later internal sends rather than proving an empty quantifier. Covers establish reachable antecedents. Unused slots can produce an unreached-antecedent note; this is distinct from an empty quantifier. The lifetime bound deliberately cannot prove unbounded-message protocols by silently truncating history; unobserved finite-state cycles and input-based liveness remain available without it. Observers cannot be used in handlers or initializers, stored in user data, or sent to another actor. [`actor-missing-reply.fml`](../../examples/actor-missing-reply.fml) demonstrates why processed work is not an implicit reply: every counter message finishes, but the client still has a replayable fair liveness failure.
+Temporal `forall` expands over these **stable potential slots**, not the messages already present in the initial state. Thus `forall (m in messages(A)) { m.sent leads_to m.processed }` covers later internal sends rather than proving an empty quantifier. Covers establish reachable antecedents. Unused slots can produce an unreached-antecedent note; this is distinct from an empty quantifier. The lifetime bound deliberately cannot prove unbounded-message protocols by silently truncating history; unobserved finite-state cycles and input-based liveness remain available without it. Observers cannot be used in handlers or initializers, stored in user data, or sent to another actor. [`missing-reply.fml`](../../examples/missing-reply.fml) demonstrates why processed work is not an implicit reply: every counter message finishes, but the client still has a replayable fair liveness failure.
 
 ### Product boundaries and compatibility
 

@@ -2,12 +2,12 @@ use flareml::{
     checker::{self, Options, Status},
     compile,
 };
-const STATELESS: &str = include_str!("../examples/actor-stateless.fml");
-const STATEFUL: &str = include_str!("../examples/actor-counter.fml");
-const CALL: &str = include_str!("../examples/actor-call.fml");
-const KEYED: &str = include_str!("../examples/actor-keyed.fml");
-const INTERLEAVING: &str = include_str!("../examples/actor-interleaving.fml");
-const ADDRESS: &str = include_str!("../examples/actor-address.fml");
+const STATELESS: &str = include_str!("../examples/eligibility-check.fml");
+const STATEFUL: &str = include_str!("../examples/counter-bound.fml");
+const CALL: &str = include_str!("../examples/forwarded-counter.fml");
+const KEYED: &str = include_str!("../examples/isolated-accounts.fml");
+const INTERLEAVING: &str = include_str!("../examples/lost-update-across-call.fml");
+const ADDRESS: &str = include_str!("../examples/routed-deposits.fml");
 fn run(source: &str) -> checker::Report {
     let p = compile(source, None).unwrap();
     checker::check(source, &p, &Options::default()).unwrap()

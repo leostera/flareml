@@ -1,4 +1,5 @@
-// Addresses are typed data; unlike Actor<State>, they can cross boundaries.
+// A dispatcher routes each deposit to the account address carried in its input.
+// Historical actors-v1 profile: addresses are transferable data, not state owners.
 type AccountId = Alice | Bob
 type Reply = Balance(Int)
 type Dispatch = Dispatch { target: Address<Account>, amount: Int }

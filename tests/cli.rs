@@ -98,7 +98,7 @@ fn artifact_is_saved_and_replayed() {
 #[test]
 fn keyed_actor_trace_roundtrips_through_cli_json() {
     let dir = tempfile::tempdir().unwrap();
-    let source = "examples/actor-interleaving.fml";
+    let source = "examples/lost-update-across-call.fml";
     let trace = dir.path().join("keyed.json");
     let check = fml(&[
         "check",
@@ -135,7 +135,7 @@ fn async_liveness_and_format_five_replay_through_public_cli() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("messages.fml");
     let trace = dir.path().join("messages.json");
-    let good = include_str!("../examples/actor-messages.fml");
+    let good = include_str!("../examples/counter-replies.fml");
     for (text, code) in [
         (good.to_owned(), 0),
         (good.replace("fairness { weak runtime.progress }", ""), 1),

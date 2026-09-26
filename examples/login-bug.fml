@@ -1,4 +1,5 @@
-// examples/login-bug.fml
+// A login policy mistakenly authorizes a user absent from the database.
+// cf-core-v0 models Worker invocations and primary-only D1 reads.
 
 type UserId = Alice | Bob
 

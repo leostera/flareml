@@ -1,5 +1,6 @@
-// Direct actor request/reply is modeled as independent, scheduled invocations.
-// actors-v1 excludes transport failures, timeouts, restarts and durability.
+// Forwarding two additions through an API still violates the counter bound.
+// Historical actors-v1 synchronous calls suspend callers; no transport faults,
+// timeouts, restarts or durability are modeled.
 type Reply = Count(Int)
 
 let increment = (owner: Actor<Int>, amount: Int): Reply {

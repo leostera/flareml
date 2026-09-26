@@ -4,7 +4,7 @@ use flareml::{
     semantics::Value,
 };
 
-const REPLY: &str = include_str!("../examples/actor-messages.fml");
+const REPLY: &str = include_str!("../examples/counter-replies.fml");
 
 fn run(source: &str) -> checker::Report {
     let program = compile(source, None).unwrap();

@@ -1,4 +1,5 @@
-// Existing users are allowed; missing users are denied.
+// A correct login policy still cannot guarantee a response without fair scheduling.
+// cf-core-v0 admits an execution that postpones a ready invocation forever.
 
 type UserId = Alice | Bob
 
