@@ -200,10 +200,10 @@ fn selected_property_and_trace_versions_are_enforced() {
     assert_eq!(r.status, Status::VerifiedInScope);
     assert_eq!(r.not_checked, ["safe"]);
     let mut trace = r.witness().unwrap().clone();
-    assert_eq!(trace.format_version, 6);
+    assert_eq!(trace.format_version, flareml::trace::FORMAT_VERSION);
     trace.format_version = 5;
     assert!(trace.validate(&source, &p).is_err());
-    trace.format_version = 6;
+    trace.format_version = flareml::trace::FORMAT_VERSION;
     trace.kind = ClaimKind::Property;
     assert!(trace.validate(&source, &p).is_err());
 }

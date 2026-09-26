@@ -1,0 +1,33 @@
+// Loss is protocol behavior, not an unreliable engine mailbox.
+// One optional request, one link decision, no retries or crashes.
+type RequestId = Purchase
+type Start = Start
+type Outcome = Deliver | Drop
+type Packet = Packet { destination: Actor<Receiver>, request: RequestId }
+actor Sender {
+  handle_message(message: Start): unit {
+    send(Link, Packet { destination: Receiver, request: Purchase });
+  }
+}
+actor Link {
+  handle_message(packet: Packet): unit {
+    let outcome = choose([Deliver, Drop]);
+    match outcome {
+      | Deliver -> send(packet.destination, packet.request)
+      | Drop -> ()
+    }
+  }
+}
+actor Receiver {
+  init(): Bool { false }
+  handle_message(state: Bool, request: RequestId): Bool { true }
+}
+property "delivery is possible" { reachable Receiver.state }
+property "submitted request eventually arrives" {
+  (exists (i in inputs(Sender)) { i.submitted }) leads_to Receiver.state
+}
+check LossyLink {
+  mailbox_bound = 1
+  inputs { once send(Sender, Start) }
+  fairness { weak runtime.progress }
+}

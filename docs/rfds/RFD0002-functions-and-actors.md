@@ -35,7 +35,7 @@ Closed variants and records describe data. Built-ins are `Bool`, `Int`, `String`
 
 Functions use typed parameters and an explicit return type (omitting the type means `unit`). The final unterminated expression or exhaustive tail match is the result. Blocks contain `let` bindings, expression statements, and `match`. Every `let` binding and every non-tail statement requires `;`, including a non-tail `match`. A terminated final expression discards its value and makes the block return `unit`; an empty block also returns `unit`. Match arms are separated by `|`, not semicolons; use a braced block for multiple statements within an arm. Whitespace/newlines alone do not separate statements. Branch-local bindings do not leak. Shadowing globals/locals, recursive local calls, non-exhaustive matches, nested constructor patterns, and record-destructuring patterns are rejected. Match a payload in a second match or bind a record and inspect fields instead.
 
-Result bindings must be matched immediately with explicit `Ok` and `Err` cases; wildcard disposal is rejected. Pure helpers, send helpers, and specification inspection are separated by conservative transitive effects. Send helpers can be called only as direct statements or bindings, not hidden inside arguments, records, constructors, or predicates.
+Result bindings must be matched immediately with explicit `Ok` and `Err` cases; wildcard disposal is rejected. Pure helpers, send/choice helpers, and specification inspection are separated by conservative transitive effects. Effectful helpers can be called only as direct statements or bindings, not hidden inside arguments, records, constructors, or predicates. [RFD0003](RFD0003-nondeterministic-choice-and-faulty-links.md) adds `let value = choose([candidate, ...]);`: nonempty literal lists of compatible pure expressions, only as a whole local binding initializer during handler execution. Choice is excluded from initialization, specifications, and external input declarations.
 
 Top-level `let` declares functions; function/handler blocks support local value bindings. Property bodies are expressions, not statement blocks, so they do not directly accept `let`. A pure or specification-only helper may use local bindings and be called from a property.
 
@@ -97,17 +97,17 @@ A check selects finite pools, bounds, external input slots, and optional fairnes
 1. Construct all finite addresses, evaluate pure initializers, and create empty mailboxes and unsubmitted input slots.
 2. Always permit an explicit stutter transition.
 3. For each unsubmitted input slot, permit one submission transition, appending its message to the target FIFO. Submission does not execute the handler.
-4. For each nonempty mailbox, permit one processing transition: remove its head, evaluate the entire callback against the old state, validate its next state and staged outbox, install the new state, and append outgoing messages in source order. Input/message completion becomes true at this commit.
+4. For each nonempty mailbox, explore the callback against the old state and head message. Every complete local choice execution permits one processing transition: remove the head, validate the next state and branch-local staged outbox, install the state, and append outgoing messages in source order. Input/message completion becomes true at this commit. Choice alternatives do not create intermediate scheduling boundaries.
 
 Different addresses can be scheduled in any order. One callback is a single atomic turn; no target can process its message until a later transition. Self-sends append after dequeue and observe the newly committed state on their next turn. A callback cannot suspend or perform external I/O.
 
 Any callback or enqueue cutoff aborts the modeled transition: no partial state commit, observation allocation, or partial outbox publication is exposed. The explorer currently stops conservatively if any generated successor exceeds a bound; it does not treat capacity as a blocked send or silently explore a pruned graph.
 
-FIFO is per target address, not global. Delivery/processing is fault-free: loss, duplication, crash, restart, timeout, retry, and durability are absent. Weak fairness affects scheduling, not whether a fault occurs.
+FIFO is per target address, not global. The engine does not inject loss, duplication, crashes, restarts, timeouts, retries, or durability. A protocol actor may explicitly choose to drop or duplicate a packet before onward delivery. Weak fairness affects scheduling, not the selection of a choice alternative.
 
 ### Fairness
 
-`fairness { weak runtime.progress }` applies to each continuously enabled mailbox processing action. Action identity is based on its typed address, not a growing message sequence number. FIFO ensures a queued head cannot be overtaken. Optional external submissions remain unfair.
+`fairness { weak runtime.progress }` applies to each continuously enabled mailbox processing action. Action identity is based on its typed address, not a growing message sequence number or choice transcript. Any completed choice outcome services the same mailbox action; alternatives are not individually fair. FIFO ensures a queued head cannot be overtaken. Optional external submissions remain unfair.
 
 Safety and reachability use the full graph. Liveness uses fair infinite paths. Fairness checks use enabledness in the original graph, not only edges retained while searching a property-restricted subgraph. Fair self-edges and distinct action labels must be preserved even when data states coincide.
 
@@ -155,13 +155,14 @@ Identical payloads get distinct slots; slots never recycle. Temporal bindings th
 - `syntax.rs`: Logos lexer with tokens/source spans, recursive-descent declarations/statements, and Pratt expression parsing. No parser-generator grammar or ad hoc regex parser.
 - `model.rs`: names/types; `functions.rs`: acyclic dependency and effect inference.
 - `claims.rs`: property classification; `semantics.rs`: values/domains and one shared statement evaluator; `messaging.rs`: initialization and atomic transitions; `observations.rs`: stable observation identities.
+- `choices.rs`: bounded prefix enumeration through the shared local interpreter; exact encounter/call-site/candidate evidence and constrained replay.
 - `checker.rs`: exact-state BFS, early safety/reachability, conservative cutoffs.
 - `graph.rs` / `temporal.rs`: reachability, fair recurrent SCCs, restricted temporal checking.
 - `trace.rs`: current-format artifacts; replay re-executes actions, compares every state and provenance, validates source/check/bounds, loop closure and original enabledness. A fixed-point interpreter independently validates the failed formula.
 - `main.rs`: clap-derived CLI; `diagnostics.rs`: ANSI-safe text reports separate from JSON.
 - `run_artifacts.rs`: CLI run bundles under `.fml/runs/<unique-id>/` (override parent with `--artifacts-dir`): exact source, requested configuration/source hash/tool version, report, and every available witness. `report.json` is the final completion marker. Verified properties have no fabricated proof trace; incomplete runs retain only genuine evidence. Source/trace replay is authoritative for witnesses; a saved report is not a proof certificate. Unreadable source and storage errors can prevent bundle completion.
 
-Current trace format is **6**. Older formats, unknown fields, altered actions, snapshots, identities, bounds, or source hashes are rejected. The format number is not a semantics switch.
+Current trace format is **7**. Each action has a choice transcript (empty for deterministic actions); replay constrains execution to it and requires exact consumption. Fair enabledness is derived from the original state's nonempty mailboxes, independently of the chosen outcomes. Older formats, unknown fields, altered actions, snapshots, identities, bounds, or source hashes are rejected. The format number is not a semantics switch.
 
 Normal validation uses stable Rust: formatting, strict Clippy, source/CLI tests, replay tests, and independent finite oracles. Temporal validation exhausts all two-state topology/fairness/predicate combinations for seven patterns and samples three-state graphs with shared action IDs. A mailbox oracle compares edge labels, queue/input identities and cutoffs. A separate state-machine oracle exhausts all 729 deterministic three-state/two-message transition tables and compares every reachable transition. These are bounded independent checks, not a proof.
 
@@ -172,7 +173,8 @@ These guards produce invalid-source errors for unsupported static structure, or 
 - CLI source size: 1 MB; trace input: 16 MB; replay: at most 100,000 actions.
 - Parser expression/tree nesting: 128; local call/data-type depth: 64.
 - Expanded local function cost: 10,000 nodes.
-- Evaluation nesting: 128; work: 100,000 entries per outer evaluation, reset after errors.
+- Evaluation nesting: 128; work: 100,000 entries per outer evaluation, reset after errors. All prefix executions of one turn share that work budget.
+- Choice: 128 encounters per turn; 4096 candidates per encounter and 4096 prefix executions per turn (including incomplete prefixes). Guards can therefore fire before 4096 completed outcomes. Expansion polls the check deadline; exhausting any guard is inconclusive.
 - Individual values: 4096 nodes / 64 levels; enumerated domain products and total addresses: 4096; domain enumeration nesting: 24.
 - Temporal expansion: 4096 clauses and 10,000 expansion steps, including paths ending in empty domains.
 - Default graph budgets: 100,000 states, depth 1000, 30 seconds. Timeouts are cooperative, not hard OS deadlines.
@@ -185,7 +187,7 @@ The generic core and unified property surface are implemented. Remaining **stabi
 
 The original proposal coupled generic-core acceptance to product adapters. That is no longer the merge boundary: no Worker/DO/Queue/D1 adapter is implemented or implied, and there is no profile registry. Resource models may later be explicit libraries/protocols, with truthful scheduling, storage, and failure rules. A model must split publication and state commit when its real system cannot justify atomicity.
 
-The proposed extension sequence is [RFD0003: choice and faulty links](RFD0003-nondeterministic-choice-and-faulty-links.md), [RFD0004: bounded spawn](RFD0004-bounded-spawn.md), then [RFD0005: suspension and reentrancy](RFD0005-suspension-and-reentrancy.md). These are not implemented and do not alter this current contract. Refine, implement, and validate each milestone separately; do not fold them into the core stabilization pass or introduce compatibility profiles.
+[RFD0003: choice and faulty links](RFD0003-nondeterministic-choice-and-faulty-links.md) is implemented and reflected in this contract. The next sketches are [RFD0004: bounded spawn](RFD0004-bounded-spawn.md), then [RFD0005: suspension and reentrancy](RFD0005-suspension-and-reentrancy.md); neither is implemented. Refine, implement, and validate each milestone separately without compatibility profiles.
 
 Constants, imports/namespaces, reusable definitions, and explicit initial population/configuration remain separate design work. Spawn must resolve definition/instance typing; imports must resolve replay source identity. No automatic RPC is implied.
 

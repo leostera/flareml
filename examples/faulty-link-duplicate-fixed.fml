@@ -1,0 +1,47 @@
+// Repair: request-keyed receivers remember whether the operation was applied.
+// Link choices still permit loss; this proves safety, not eventual delivery.
+// Ledger update and application are one atomic turn, not separate external I/O.
+type RequestId = Purchase
+type Start = Start
+type Outcome = Deliver | Drop | Duplicate
+type Ledger = Fresh | Recorded
+type ReceiverState = ReceiverState { ledger: Ledger, applications: Int, deliveries: Int }
+type Packet = Packet { destination: Actor<Receiver>, request: RequestId }
+actor Sender {
+  handle_message(message: Start): unit {
+    send(Link, Packet { destination: Receiver.at(Purchase), request: Purchase });
+  }
+}
+actor Link {
+  handle_message(packet: Packet): unit {
+    let outcome = choose([Deliver, Drop, Duplicate]);
+    match outcome {
+      | Deliver -> send(packet.destination, packet.request)
+      | Drop -> ()
+      | Duplicate -> {
+          send(packet.destination, packet.request);
+          send(packet.destination, packet.request);
+        }
+    }
+  }
+}
+actor Receiver(id: RequestId) {
+  init(id: RequestId): ReceiverState { ReceiverState { ledger: Fresh, applications: 0, deliveries: 0 } }
+  handle_message(state: ReceiverState, request: RequestId): ReceiverState {
+    match state.ledger {
+      | Fresh -> ReceiverState { ledger: Recorded, applications: state.applications + 1, deliveries: state.deliveries + 1 }
+      | Recorded -> ReceiverState { ledger: Recorded, applications: state.applications, deliveries: state.deliveries + 1 }
+    }
+  }
+}
+property "one application per request" {
+  always (forall (id in RequestId) { Receiver.at(id).state.applications <= 1 })
+}
+property "delivery is possible" { reachable (Receiver.at(Purchase).state.applications == 1) }
+property "a duplicate can finish" { reachable (Receiver.at(Purchase).state.deliveries == 2) }
+check DuplicatingLink {
+  domain Int = 0..2
+  mailbox_bound = 2
+  inputs { once send(Sender, Start) }
+  fairness { weak runtime.progress }
+}

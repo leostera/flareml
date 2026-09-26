@@ -115,6 +115,7 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
                 "no lifetime message history selected; external input observations remain finite"
                     .into()
             },
+            "finite choose alternatives are exhaustive and unfair; weak mailbox progress does not force any choice outcome".into(),
             "exact state equality; no symmetry or partial-order reduction".into(),
         ],
         states: 0,
@@ -193,7 +194,7 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
             failure = true;
             break;
         }
-        let successors = match p.successors(&states[cursor]) {
+        let successors = match p.message_successors(&states[cursor], Some(&budget), None) {
             Ok(s) => s,
             Err(e) if e.message.starts_with("LIMIT:") => {
                 report.cutoff = Some(e.message);

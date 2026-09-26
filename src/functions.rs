@@ -1,4 +1,4 @@
-//! Actor binding and conservative, transitive pure/send/inspection effects.
+//! Actor binding and conservative, transitive send/choice/inspection effects.
 use crate::{
     model::{Effects, Program, Ty},
     syntax::*,
@@ -10,15 +10,18 @@ impl Program {
         self.functions.contains_key(name)
             || self.actors.contains_key(name)
             || self.constructors.contains_key(name)
-            || ["send", "inputs", "messages", "Some", "None", "Ok", "Err"].contains(&name)
+            || [
+                "send", "choose", "inputs", "messages", "Some", "None", "Ok", "Err",
+            ]
+            .contains(&name)
     }
     pub(crate) fn bind_actors_and_functions(&mut self) -> Result<()> {
         let mut names: BTreeSet<String> = self.constructors.keys().cloned().collect();
         names.extend(self.model.types.iter().map(|t| t.name.clone()));
         names.extend(
             [
-                "send", "inputs", "messages", "Some", "None", "Ok", "Err", "Actor", "Option",
-                "Result",
+                "send", "choose", "inputs", "messages", "Some", "None", "Ok", "Err", "Actor",
+                "Option", "Result",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -114,7 +117,11 @@ impl Program {
                     }
                     _ => false,
                 };
-                if !key_matches || self.effects[init].sends || self.effects[init].inspects {
+                if !key_matches
+                    || self.effects[init].sends
+                    || self.effects[init].chooses
+                    || self.effects[init].inspects
+                {
                     return Err(Error::new(
                         f.span,
                         "init must be pure and take only the actor identity (or no arguments for a singleton)",
@@ -209,6 +216,9 @@ impl Program {
                     if path == "send" {
                         fx.sends = true;
                     }
+                    if path == "choose" {
+                        fx.chooses = true;
+                    }
                 }
             });
             for dep in &dependencies {
@@ -245,10 +255,10 @@ impl Program {
                     "expanded function cost exceeds 10,000-node elaboration limit",
                 ));
             }
-            if fx.inspects && fx.sends {
+            if fx.inspects && (fx.sends || fx.chooses) {
                 return Err(Error::new(
                     self.functions[name].span,
-                    "a function cannot mix specification inspection with send effects",
+                    "a function cannot mix specification inspection with send/choice effects",
                 ));
             }
             depths.insert(name.clone(), depth);

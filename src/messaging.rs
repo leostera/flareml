@@ -90,18 +90,35 @@ impl Program {
         }
         Ok(s)
     }
-    pub(crate) fn message_successors(&self, s: &State) -> Result<Vec<Step>> {
+    pub(crate) fn fair_enabled(&self, s: &State) -> std::collections::BTreeSet<String> {
+        // Every nonempty FIFO has a processing action; choices do not change its
+        // fairness identity. Closed-graph checking rules out incomplete turns.
+        s.mailboxes
+            .iter()
+            .filter(|(_, queue)| self.check.fair && !queue.is_empty())
+            .map(|(address, _)| processing_id(address))
+            .collect()
+    }
+    pub(crate) fn message_successors(
+        &self,
+        s: &State,
+        budget: Option<&crate::graph::Budget>,
+        replay: Option<&Action>,
+    ) -> Result<Vec<Step>> {
         let mut steps = vec![Step {
             action: Action {
                 id: "stutter".into(),
                 description: "stutter".into(),
                 span: Span::default(),
                 fair: false,
+                choices: Vec::new(),
             },
             state: s.clone(),
         }];
         for (i, input) in self.check.inputs.iter().enumerate() {
-            if s.input_submitted[i] {
+            if s.input_submitted[i]
+                || replay.is_some_and(|action| action.id != format!("submit:{i}"))
+            {
                 continue;
             }
             let key = input
@@ -127,11 +144,15 @@ impl Program {
                     description: format!("submit {message} to {address} from input #{i}"),
                     span: input.span,
                     fair: false,
+                    choices: Vec::new(),
                 },
                 state: next,
             });
         }
         for (address, queue) in &s.mailboxes {
+            if replay.is_some_and(|action| action.id != processing_id(address)) {
+                continue;
+            }
             let Some(envelope) = queue.first() else {
                 continue;
             };
@@ -150,52 +171,71 @@ impl Program {
                 });
             }
             args.push(message.clone());
-            let mut env: Env = function
+            let env: Env = function
                 .params
                 .iter()
                 .zip(args)
                 .map(|((name, _), value)| (name.clone(), value))
                 .collect();
-            let mut outbox = vec![];
-            let next_state = self.eval_body(&function.body, &mut env, s, Some(&mut outbox))?;
-            self.check_value(&next_state, function.span)?;
-            // Work on a clone: a cutoff never partly mutates the source state.
-            let mut next = s.clone();
-            next.mailboxes
-                .get_mut(address)
-                .expect("known mailbox")
-                .remove(0);
-            if actor.state.is_some() {
-                if actor.key.is_some() {
-                    next.keyed_actors
-                        .get_mut(actor_name)
-                        .expect("initialized actor")
-                        .insert(*key.clone(), next_state.clone());
-                } else {
-                    next.actors.insert(actor_name.clone(), next_state.clone());
+            for (next_state, turn) in self.turn_outcomes(
+                &function.body,
+                &env,
+                s,
+                budget,
+                replay.map(|action| action.choices.as_slice()),
+            )? {
+                turn.poll()?;
+                self.check_value(&next_state, function.span)?;
+                // Work on a clone: a cutoff never partly mutates the source state.
+                let mut next = s.clone();
+                next.mailboxes
+                    .get_mut(address)
+                    .expect("known mailbox")
+                    .remove(0);
+                if actor.state.is_some() {
+                    if actor.key.is_some() {
+                        next.keyed_actors
+                            .get_mut(actor_name)
+                            .expect("initialized actor")
+                            .insert(*key.clone(), next_state.clone());
+                    } else {
+                        next.actors.insert(actor_name.clone(), next_state.clone());
+                    }
                 }
+                if let Some(i) = envelope.input {
+                    next.input_processed[i] = true;
+                }
+                if let Some(i) = envelope.observation {
+                    next.messages.get_mut(actor_name).expect("observed actor")[i].processed = true;
+                }
+                let count = turn.outbox.len();
+                let mut sends = vec![];
+                for (target, value, source) in turn.outbox {
+                    sends.push(format!("{value} -> {target} at byte {}", source.start));
+                    self.enqueue_message(&mut next, target, value, None, source)?;
+                }
+                let description = format!(
+                    "process {message} at {address}; commit {next_state}; enqueue {count} message(s) [{}]",
+                    sends.join(", ")
+                );
+                steps.push(Step {
+                    action: Action {
+                        id: processing_id(address),
+                        description,
+                        span: function.span,
+                        fair: self.check.fair,
+                        choices: turn.choices,
+                    },
+                    state: next,
+                });
             }
-            if let Some(i) = envelope.input {
-                next.input_processed[i] = true;
-            }
-            if let Some(i) = envelope.observation {
-                next.messages.get_mut(actor_name).expect("observed actor")[i].processed = true;
-            }
-            let count = outbox.len();
-            let mut sends = vec![];
-            for (target, value, source) in outbox {
-                sends.push(format!("{value} -> {target} at byte {}", source.start));
-                self.enqueue_message(&mut next, target, value, None, source)?;
-            }
-            steps.push(Step {
-                action: Action {
-                    id: format!("process:{}", serde_json::to_string(address).expect("serializable address")),
-                    description: format!("process {message} at {address}; commit {next_state}; enqueue {count} message(s) [{}]", sends.join(", ")),
-                    span: function.span, fair: self.check.fair,
-                },
-                state: next,
-            });
         }
         Ok(steps)
     }
+}
+fn processing_id(address: &Value) -> String {
+    format!(
+        "process:{}",
+        serde_json::to_string(address).expect("serializable address")
+    )
 }

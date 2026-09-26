@@ -123,7 +123,7 @@ fn current_trace_format_only_and_no_semantics_switch() {
     assert!(artifact["states"][0]["keyed_actors"]["Client"].is_array());
     assert!(artifact["states"][0].get("frames").is_none());
     assert!(artifact["states"][0].get("tables").is_none());
-    for version in [0, 1, 2, 3, 4, 5, 999] {
+    for version in [0, 1, 2, 3, 4, 5, 6, 999] {
         let mut old = artifact.clone();
         old["format_version"] = version.into();
         fs::write(&trace, serde_json::to_vec(&old).unwrap()).unwrap();

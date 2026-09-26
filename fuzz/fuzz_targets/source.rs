@@ -13,7 +13,8 @@ fuzz_target!(|source: &str| {
         };
         if let Err(error) = flareml::checker::check(source, &program, &options) {
             assert!(
-                !error.message.starts_with("internal:") && !error.message.starts_with("invalid trace:"),
+                !error.message.starts_with("internal:")
+                    && !error.message.starts_with("invalid trace:"),
                 "accepted source caused a checker failure: {error}"
             );
         }

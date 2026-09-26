@@ -152,6 +152,7 @@ pub struct Action {
     pub description: String,
     pub span: Span,
     pub fair: bool,
+    pub choices: Vec<crate::choices::Choice>,
 }
 #[derive(Clone, Debug)]
 pub struct Step {
@@ -164,7 +165,7 @@ impl Program {
         self.initial_messages()
     }
     pub fn successors(&self, s: &State) -> Result<Vec<Step>> {
-        self.message_successors(s)
+        self.message_successors(s, None, None)
     }
     pub fn check_value(&self, v: &Value, span: Span) -> Result<()> {
         let mut remaining = 4096usize;
@@ -409,10 +410,10 @@ impl Program {
                     return Ok(address);
                 }
                 if let Some(function) = self.functions.get(&path) {
-                    if self.effects[&path].sends {
+                    if self.effects[&path].sends || self.effects[&path].chooses {
                         return Err(Error::new(
                             e.span,
-                            "internal: send helper reached pure evaluation",
+                            "internal: effectful helper reached pure evaluation",
                         ));
                     }
                     let values = args.iter().map(ev).collect::<Result<Vec<_>>>()?;
@@ -532,21 +533,24 @@ impl Program {
         body: &[Stmt],
         env: &mut Env,
         s: &State,
-        mut outbox: Option<&mut Outbox>,
+        mut turn: Option<&mut crate::choices::Turn<'_>>,
     ) -> Result<Value> {
         let _guard = crate::evaluation::EvaluationGuard::enter(
             body.first().map_or(Span::default(), |s| s.span),
         )?;
         let mut result = Value::Unit;
         for statement in body {
+            if let Some(turn) = &turn {
+                turn.poll()?;
+            }
             result = match &statement.kind {
                 StmtKind::Let(name, expr) => {
-                    let value = self.eval_statement(expr, env, s, outbox.as_deref_mut())?;
+                    let value = self.eval_statement(expr, env, s, turn.as_deref_mut())?;
                     self.check_value(&value, expr.span)?;
                     env.insert(name.clone(), value);
                     Value::Unit
                 }
-                StmtKind::Expr(expr) => self.eval_statement(expr, env, s, outbox.as_deref_mut())?,
+                StmtKind::Expr(expr) => self.eval_statement(expr, env, s, turn.as_deref_mut())?,
                 StmtKind::Match(expr, arms) => {
                     let value = self.eval(expr, env, s)?;
                     self.check_value(&value, expr.span)?;
@@ -558,7 +562,7 @@ impl Program {
                                 branch,
                                 &mut locals,
                                 s,
-                                outbox.as_deref_mut(),
+                                turn.as_deref_mut(),
                             )?);
                             break;
                         }
@@ -577,12 +581,24 @@ impl Program {
         expr: &Expr,
         env: &Env,
         s: &State,
-        outbox: Option<&mut Outbox>,
+        turn: Option<&mut crate::choices::Turn<'_>>,
     ) -> Result<Value> {
-        if let Some(outbox) = outbox
+        if let Some(turn) = turn
             && let ExprKind::Call(target, args) = &expr.kind
         {
             let path = target.path().unwrap_or_default();
+            if path == "choose" {
+                let [
+                    Expr {
+                        kind: ExprKind::List(candidates),
+                        ..
+                    },
+                ] = args.as_slice()
+                else {
+                    return Err(Error::new(expr.span, "internal: invalid choice operand"));
+                };
+                return turn.choose(self, candidates, expr.span, env, s);
+            }
             if path == "send" {
                 let address = self.eval(&args[0], env, s)?;
                 let message = self.eval(&args[1], env, s)?;
@@ -593,11 +609,11 @@ impl Program {
                         "LIMIT: send target outside finite identity domain",
                     ));
                 }
-                outbox.push((address, message, expr.span));
+                turn.outbox.push((address, message, expr.span));
                 return Ok(Value::Unit);
             }
             if let Some(f) = self.functions.get(&path)
-                && self.effects[&path].sends
+                && (self.effects[&path].sends || self.effects[&path].chooses)
             {
                 let values = args
                     .iter()
@@ -612,7 +628,10 @@ impl Program {
                     .zip(values)
                     .map(|((name, _), value)| (name.clone(), value))
                     .collect();
-                return self.eval_body(&f.body, &mut locals, s, Some(outbox));
+                turn.calls.push(expr.span);
+                let result = self.eval_body(&f.body, &mut locals, s, Some(turn));
+                turn.calls.pop();
+                return result;
             }
         }
         self.eval(expr, env, s)

@@ -45,6 +45,7 @@ Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 - [x] Actor-renaming/declaration-reordering metamorphic checks and concrete counterexamples under increased mailbox bounds.
 - [x] Default source/configuration/report/all-witness bundles; snapshot replay, corruption rejection, safe filenames, incomplete/invalid reports, I/O failure and concurrent allocation tests.
 - [x] Inventory reservation and payment idempotency bug/repair pairs, including non-vacuous completion queries.
+- [x] RFD0003 choice extension: independent candidate-product checks, branch-local outbox/observation isolation, constrained transcript replay, fairness/cutoff regressions, and loss/duplication examples checked per obligation.
 
 ## Remaining validation before calling the core stable
 
@@ -55,7 +56,7 @@ Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 
 Instrumented evidence: [GitHub Actions run 36258519843](https://github.com/leostera/flareml/actions/runs/36258519843), on core revision `f582520`, passed both nightly sanitizer targets with valid source/trace seeds and seed `12345`. Source: **791,126 executions in 121 seconds**; trace JSON: **3,018,940 executions in 121 seconds**. Logs were inspected; corpus artifacts were uploaded. These are short smoke campaigns, not a coverage-completeness claim, and predate the run-bundle additions. Longer campaigns and coverage-gap review remain open.
 
-Local nightly installation previously timed out; no instrumented local campaign is claimed. Nightly remains optional, only for fuzzing.
+A later local nightly installation succeeded for [RFD0003](RFD0003-nondeterministic-choice-and-faulty-links.md#recorded-validation-and-measurements). Its choice/source and format-7 replay campaigns passed; see that RFD for counts, seeds, and measured branching cutoffs. Nightly remains optional, only for fuzzing.
 
 ## Deferred scope, not generic-core blockers
 

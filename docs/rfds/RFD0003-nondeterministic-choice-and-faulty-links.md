@@ -1,6 +1,6 @@
 # RFD0003 — Nondeterministic choice and faulty links
 
-**Status:** proposed; not implemented. First implementation milestone after the [current RFD0002 contract](RFD0002-functions-and-actors.md).
+**Status:** implemented. The [current RFD0002 contract](RFD0002-functions-and-actors.md) includes this extension. Ongoing independent review and longer fuzz campaigns remain part of stabilization, not a claim of proven correctness.
 
 **Sequence:** implement and validate this RFD before [bounded spawn (RFD0004)](RFD0004-bounded-spawn.md), then [suspension and reentrancy (RFD0005)](RFD0005-suspension-and-reentrancy.md). Those sketches do not expand this milestone.
 
@@ -10,9 +10,9 @@ Actors are concurrent participants, broadly comparable to processes in an algori
 
 Add a finite, explicit choice inside a turn. This makes protocol alternatives model code, rather than engine-selected transport profiles. Start with a small, testable semantic extension; no suspension, dynamic allocation, general shared memory, or standard-library packaging is required.
 
-## Proposed language
+## Language
 
-The following is proposed syntax, not currently executable FML:
+Implemented syntax:
 
 ```text
 let outcome = choose([Deliver, Drop, Duplicate]);
@@ -64,7 +64,7 @@ Do not independently re-evaluate nondeterministic helpers while inspecting a sta
 
 ### Bounds and failure
 
-Branch expansion introduces another source of host work and state explosion. Before implementation, define and document an explicit per-turn exploration guard and how it shares the existing work/depth/timeout budgets. Poll during expansion, not only between completed turns. A Cartesian product must not be fully allocated before checking its size/work bound.
+Branch expansion introduces another source of host work and state explosion. The implementation bounds a turn to 128 choice encounters, 4096 candidates per encounter, and 4096 prefix executions, including incomplete prefixes. All attempts share the existing 100,000-entry evaluation work budget and nesting guards; the check deadline is polled during statements, candidate evaluation, expansion, and branch commit. Poll during expansion, not only between completed turns. A Cartesian product must not be fully allocated before checking its size/work bound.
 
 A capacity/domain/evaluation cutoff in any permitted branch makes exploration incomplete. Never silently remove the branch and verify the remaining graph. An invalid model computation must retain the existing diagnostic classification; it is not converted into a modeled nondeterministic failure.
 
@@ -129,28 +129,55 @@ Current trace actions identify deterministic turns. A nondeterministic turn need
 - the source location and sufficient execution context to distinguish repeated helper calls;
 - the selected candidate position, with the selected value either recorded and checked or deterministically reconstructed.
 
-A source span alone is not an encounter identifier: the same helper can run multiple times in one turn. Define the concrete transcript schema during implementation and increment the current trace format. Continue accepting only that current format, not a choice-enabled compatibility profile.
+A source span alone is not an encounter identifier: the same helper can run multiple times in one turn. The implemented format is **7**: every action includes `choices`, an ordered array of `{ encounter, span, calls, candidate, value }`. `encounter` and `candidate` are zero-based; `calls` is the ordered stack of helper call-expression spans. Selected values are recorded and checked against freshly evaluated candidates. Continue accepting only that current format, not a choice-enabled compatibility profile.
 
 Replay must re-execute the turn with the transcript, check every candidate selection against the freshly evaluated candidate list, consume the transcript exactly, and compare the resulting state, sends, provenance, and observations. Reject missing, extra, reordered, out-of-range, or source-mismatched selections. Never validate a trace by rerunning an unconstrained choice and hoping for the same result.
 
 Keep fairness identity separate from branch evidence. Equal successor states may be interned, but edge handling must not lose required action/fairness distinctions or produce unreplayable paths. Run bundles must persist all available witnesses using the new trace representation.
 
+## Implementation details
+
+`choices.rs` enumerates choice prefixes in source order through the same `eval_body` interpreter used by deterministic turns. At the first missing selection, evaluation requests an extension; each candidate yields a new prefix. Each attempt begins with fresh locals and an empty staged outbox. Re-executing deterministic prefixes trades speed for a small shared interpreter and explicit isolation; it is not a state-space reduction.
+
+The whole per-turn enumeration is bounded before queuing further prefixes. Completed outcomes are committed through the existing atomic messaging path. As before, a successor-generation cutoff conservatively stops exploration; unreturned sibling outcomes are not treated as discovered witnesses. Previously discovered evidence is retained.
+
+Replay supplies a complete transcript and executes only its selected branch. It rejects extra or missing selections and altered encounter/site/call context, position, or value. It compares the full resulting action and state. A different transcript that describes an equally valid execution is not intrinsically corruption; evidence is validated semantically, not cryptographically authenticated. Fair enabledness comes from nonempty mailboxes in the original state, without expanding unrelated choice outcomes during replay.
+
 ## Implementation and acceptance checklist
 
-- [ ] Reserve/type `choose` and enforce binding placement, nonempty literal operands, compatible types, and pure candidates.
-- [ ] Infer and enforce transitive choice effects, including indirect initializer/property/input uses.
-- [ ] Extend the shared local interpreter to enumerate branch-local executions without duplicating incompatible evaluator semantics.
-- [ ] Integrate all completed outcomes into successor generation, with explicit bounded work and truthful incomplete exploration.
-- [ ] Preserve mailbox fairness identity independently of chosen alternatives.
-- [ ] Version trace evidence and implement constrained replay with exact transcript consumption.
-- [ ] Add the complete faulty-link scenarios above, documented assumptions, expected per-property verdicts, and persisted witness replay.
-- [ ] Compare small choice programs with an independent enumeration oracle: nested choices, conditional encounters, helper calls, and multiple sends.
-- [ ] Test duplicates, malformed/empty operands, branch-local scope, immediate Result handling, and effect escapes.
-- [ ] Test outbox/state/observation isolation and bounds reached on one branch without false verification.
-- [ ] Test that fair processing does not force a favorable choice; replay the corresponding lasso.
-- [ ] Tamper every transcript dimension; include semantically valid but wrong alternative selections and repeated helper sites.
-- [ ] Add source/trace fuzz seeds, run stable checks and instrumented campaigns, and record actual evidence.
-- [ ] Measure choice-heavy examples, including state/edge counts and cutoffs. Make no reduction or scalability claims without evidence.
-- [ ] Update RFD0002/current documentation only when the behavior is implemented; record the trace version and host guard values.
+- [x] Reserve/type `choose` and enforce binding placement, nonempty literal operands, compatible types, and pure candidates.
+- [x] Infer and enforce transitive choice effects, including indirect initializer/property/input uses.
+- [x] Extend the shared local interpreter to enumerate branch-local executions without duplicating incompatible evaluator semantics.
+- [x] Integrate all completed outcomes into successor generation, with explicit bounded work and truthful incomplete exploration.
+- [x] Preserve mailbox fairness identity independently of chosen alternatives.
+- [x] Version trace evidence and implement constrained replay with exact transcript consumption.
+- [x] Add the complete faulty-link scenarios above, documented assumptions, expected per-property verdicts, and persisted witness replay.
+- [x] Compare small choice programs with an independent enumeration oracle: nested choices, conditional encounters, helper calls, and multiple sends.
+- [x] Test duplicates, malformed/empty operands, branch-local scope, immediate Result handling, and effect escapes.
+- [x] Test outbox/state/observation isolation and bounds reached on one branch without false verification.
+- [x] Test that fair processing does not force a favorable choice; replay the corresponding lasso.
+- [x] Tamper every transcript dimension; include semantically valid but wrong alternative selections and repeated helper sites.
+- [x] Add source/trace fuzz seeds, run stable checks and instrumented campaigns, and record actual evidence.
+- [x] Measure choice-heavy examples, including state/edge counts and cutoffs. Make no reduction or scalability claims without evidence.
+- [x] Update RFD0002/current documentation only when the behavior is implemented; record the trace version and host guard values.
 
-Implementation should settle the transcript schema and expansion-budget details before merging. The semantic decisions above are the proposed scope for review, not a claim that the engine already supports them.
+## Recorded validation and measurements
+
+The implemented examples are [loss](../../examples/faulty-link-loss.fml), [duplicate-application bug](../../examples/faulty-link-duplicate-bug.fml), and [idempotent repair](../../examples/faulty-link-duplicate-fixed.fml). `tests/faulty_links.rs` independently selects all eight intended obligations, checks verdicts, replays finite/lasso evidence, and corrupts persisted choice transcripts. `tests/choices.rs` compares 16 candidate-list pairs against independent Cartesian enumeration, checks dependent helper calls and outbox order, branching encounter counts, effect restrictions, Result handling, fairness, safety, cutoff preservation, and transcript tampering. Unit regressions check expansion deadline propagation/guard reset and compare replay fairness enabledness against exhaustive successor generation. Final stable validation: **147 tests passed**, formatting and strict all-target Clippy passed, and fuzz targets compile on stable.
+
+Initial local coverage/sanitizer-instrumented campaigns on `aarch64-apple-darwin`, nightly, seed `12345`, with `-max_total_time=120 -timeout=10 -rss_limit_mb=2048` passed: **790,621 source executions** and **2,896,980 trace-JSON executions**, each in 121 seconds. Valid source and format-7 trace seeds included the faulty-link models; the trace fuzzer selects the matching source fixture by hash. These short campaigns are smoke evidence, not a coverage-completeness claim. CI seed generation was extended accordingly. Follow-up 120-second reruns were interrupted by the orchestration wall-time limit and are not counted as completed campaigns. Final instrumented smoke runs on the updated binaries completed **20,000 executions per target** (seed `67890`; source 4 seconds, trace JSON 1 second) without reported failures.
+
+Exploration measurements with default graph budgets and no message-history bound:
+
+| Model | States | Edges | Result / completeness |
+| --- | ---: | ---: | --- |
+| Faulty-link loss | 6 | 11 | Violated; closed graph |
+| Duplicate-application bug | 9 | 16 | Violated; early safety exit |
+| Idempotent repair | 9 | 17 | Verified in scope; closed graph |
+| 1 independent binary choice | 4 | 7 | Verified in scope |
+| 4 independent binary choices | 4 | 21 | Verified in scope |
+| 8 independent binary choices | 4 | 261 | Verified in scope |
+| 10 independent binary choices | 4 | 1029 | Verified in scope |
+| 12 or 14 independent binary choices | 2 | 2 | Inconclusive: 100,000-entry evaluation guard |
+
+The synthetic model uses one Boolean actor, one optional unit input, sequential `let xN = choose([false, true]);` bindings, returns the last binding, and checks `always true` with mailbox bound 1. Earlier choices are deliberately unused: equal resulting states do not remove alternative labeled edges. These are tiny bounded measurements demonstrating exponential local branching and honest cutoffs, not practical scalability claims for large protocols. Reordering, libraries, spawn, and suspension remain outside this milestone.

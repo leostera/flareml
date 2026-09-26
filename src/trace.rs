@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
 /// Only this artifact layout/meaning is supported; older traces must be regenerated.
-pub const FORMAT_VERSION: u32 = 6;
+pub const FORMAT_VERSION: u32 = 7;
 
 pub fn source_hash(source: &str) -> String {
     format!("{:x}", Sha256::digest(source.as_bytes()))
@@ -94,7 +94,7 @@ impl Trace {
         }
         for (i, action) in self.actions.iter().enumerate() {
             let step = p
-                .successors(&current)?
+                .message_successors(&current, None, Some(action))?
                 .into_iter()
                 .find(|s| &s.action == action)
                 .ok_or_else(|| bad("action is not enabled or metadata was changed"))?;
@@ -110,12 +110,7 @@ impl Trace {
             let mut fair_actions = BTreeSet::new();
             let mut enabled = vec![];
             for s in &self.states[start..self.actions.len()] {
-                let set: BTreeSet<_> = p
-                    .successors(s)?
-                    .into_iter()
-                    .filter(|s| s.action.fair)
-                    .map(|s| s.action.id)
-                    .collect();
+                let set = p.fair_enabled(s);
                 fair_actions.extend(set.iter().cloned());
                 enabled.push(set);
             }

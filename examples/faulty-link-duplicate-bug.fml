@@ -1,0 +1,44 @@
+// A link may deliver, drop, or duplicate one logical purchase request.
+// The receiver applies each delivery without checking the request identity.
+// No retries, crashes, persistence, or external charge API are modeled.
+type RequestId = Purchase
+type Start = Start
+type Outcome = Deliver | Drop | Duplicate
+type Ledger = Fresh | Recorded
+type ReceiverState = ReceiverState { ledger: Ledger, applications: Int, deliveries: Int }
+type Packet = Packet { destination: Actor<Receiver>, request: RequestId }
+actor Sender {
+  handle_message(message: Start): unit {
+    send(Link, Packet { destination: Receiver.at(Purchase), request: Purchase });
+  }
+}
+actor Link {
+  handle_message(packet: Packet): unit {
+    let outcome = choose([Deliver, Drop, Duplicate]);
+    match outcome {
+      | Deliver -> send(packet.destination, packet.request)
+      | Drop -> ()
+      | Duplicate -> {
+          send(packet.destination, packet.request);
+          send(packet.destination, packet.request);
+        }
+    }
+  }
+}
+actor Receiver(id: RequestId) {
+  init(id: RequestId): ReceiverState { ReceiverState { ledger: Fresh, applications: 0, deliveries: 0 } }
+  handle_message(state: ReceiverState, request: RequestId): ReceiverState {
+    ReceiverState { ledger: Recorded, applications: state.applications + 1, deliveries: state.deliveries + 1 }
+  }
+}
+property "one application per request" {
+  always (forall (id in RequestId) { Receiver.at(id).state.applications <= 1 })
+}
+property "delivery is possible" { reachable (Receiver.at(Purchase).state.applications == 1) }
+property "a duplicate can finish" { reachable (Receiver.at(Purchase).state.deliveries == 2) }
+check DuplicatingLink {
+  domain Int = 0..2
+  mailbox_bound = 2
+  inputs { once send(Sender, Start) }
+  fairness { weak runtime.progress }
+}

@@ -17,6 +17,9 @@ fn every_scenario_has_a_checked_verdict_and_replay() {
         ("inventory-reservation-fixed.fml", Status::VerifiedInScope),
         ("payment-idempotency-bug.fml", Status::Violated),
         ("payment-idempotency-fixed.fml", Status::VerifiedInScope),
+        ("faulty-link-loss.fml", Status::Violated),
+        ("faulty-link-duplicate-bug.fml", Status::Violated),
+        ("faulty-link-duplicate-fixed.fml", Status::VerifiedInScope),
     ];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let actual: BTreeSet<_> = std::fs::read_dir(&root)

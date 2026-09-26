@@ -40,11 +40,13 @@ pub struct Constructor {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Effects {
     pub sends: bool,
+    pub chooses: bool,
     pub inspects: bool,
 }
 impl Effects {
     pub fn include(&mut self, other: Self) {
         self.sends |= other.sends;
+        self.chooses |= other.chooses;
         self.inspects |= other.inspects;
     }
 }
@@ -94,11 +96,12 @@ impl Program {
             actors: BTreeMap::new(),
             effects: BTreeMap::new(),
         };
-        let mut type_names: BTreeSet<String> =
-            ["Bool", "Int", "String", "unit", "Option", "Result", "Actor"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect();
+        let mut type_names: BTreeSet<String> = [
+            "Bool", "Int", "String", "unit", "Option", "Result", "Actor", "choose",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
         for d in &p.model.types {
             if !type_names.insert(d.name.clone()) {
                 return Err(Error::new(d.span, "duplicate or reserved type name"));
@@ -115,8 +118,10 @@ impl Program {
                 continue;
             }
             for v in &d.variants {
-                if ["None", "Some", "Ok", "Err", "send", "inputs", "messages"]
-                    .contains(&v.name.as_str())
+                if [
+                    "None", "Some", "Ok", "Err", "send", "choose", "inputs", "messages",
+                ]
+                .contains(&v.name.as_str())
                     || p.constructors
                         .insert(
                             v.name.clone(),
@@ -319,7 +324,45 @@ impl Program {
         for (index, s) in body.iter().enumerate() {
             result = match &s.kind {
                 StmtKind::Let(n, e) => {
-                    let t = self.type_expr(e, env, property, true)?;
+                    let t = if let ExprKind::Call(target, args) = &e.kind
+                        && target.path().as_deref() == Some("choose")
+                    {
+                        if property {
+                            return Err(Error::new(e.span, "choose is a handler-only effect"));
+                        }
+                        let [
+                            Expr {
+                                kind: ExprKind::List(xs),
+                                ..
+                            },
+                        ] = args.as_slice()
+                        else {
+                            return Err(Error::new(
+                                e.span,
+                                "choose requires a nonempty list literal",
+                            ));
+                        };
+                        if xs.is_empty() {
+                            return Err(Error::new(
+                                e.span,
+                                "choose requires a nonempty list literal",
+                            ));
+                        }
+                        let mut ty = Ty::Never;
+                        for candidate in xs {
+                            ty = ty
+                                .merge(&self.type_expr(candidate, env, false, false)?)
+                                .ok_or_else(|| {
+                                    Error::new(
+                                        candidate.span,
+                                        "choose candidates must have a single compatible type",
+                                    )
+                                })?;
+                        }
+                        ty
+                    } else {
+                        self.type_expr(e, env, property, true)?
+                    };
                     if matches!(t, Ty::Result(..)) && !body.get(index + 1).is_some_and(|next| matches!(
                         &next.kind, StmtKind::Match(Expr { kind: ExprKind::Name(bound), .. }, _) if bound == n)) {
                         return Err(Error::new(s.span, "a Result binding must be matched immediately"));
@@ -623,10 +666,12 @@ impl Program {
                 let path = f.path().unwrap_or_default();
                 if let Some(function) = self.functions.get(&path) {
                     let fx = self.effects[&path];
-                    if (fx.sends && (property || !effect)) || (fx.inspects && !property) {
+                    if ((fx.sends || fx.chooses) && (property || !effect))
+                        || (fx.inspects && !property)
+                    {
                         return Err(Error::new(
                             e.span,
-                            "function effects are not allowed here (send helpers must be direct statements/bindings; inspectors are specification-only)",
+                            "function effects are not allowed here (send/choice helpers must be direct statements/bindings; inspectors are specification-only)",
                         ));
                     }
                     if function.params.len() != args.len() {
@@ -636,6 +681,12 @@ impl Program {
                         self.require(&self.resolve(ty, arg.span)?, &pure(arg)?, arg.span)?;
                     }
                     return self.resolve(&function.output, e.span);
+                }
+                if path == "choose" {
+                    return Err(Error::new(
+                        e.span,
+                        "choose must be the complete initializer of a local let binding",
+                    ));
                 }
                 if path == "send" {
                     if property || !effect || args.len() != 2 {

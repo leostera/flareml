@@ -60,6 +60,14 @@ check OneIncrement {
 
 No suspended calls, threads, storage backends, crashes, retries, timers, imports, or dynamic spawning are built in. Model intervening steps explicitly: a read followed by a write must be two protocol turns if other participants can act between them. Atomic turns are modeling assumptions, not a guarantee made by an HTTP service or real transport.
 
+## Explicit nondeterminism
+
+`let outcome = choose([Deliver, Drop, Duplicate]);` branches a handler turn over **every** listed outcome. It is not random sampling and does not suspend the handler. Use a nonempty literal list of compatible, pure candidate expressions; `choose` must be the whole initializer of a local binding. Handler-only helpers may choose transitively. Initialization, properties, input declarations, and pure expression contexts cannot choose.
+
+A link actor can choose to forward, drop, or duplicate a packet while the underlying engine mailboxes remain fault-free FIFO. See [loss](examples/faulty-link-loss.fml), [duplicate application](examples/faulty-link-duplicate-bug.fml), and its [idempotent repair](examples/faulty-link-duplicate-fixed.fml). Weak mailbox fairness does **not** force a favorable choice or eventual delivery. Reordering requires an explicit buffer, not just a different choice label.
+
+Expansion is bounded: at most 128 encounters per turn and 4096 prefix executions, sharing the 100,000-entry evaluation budget across alternatives. Exceeding a guard is inconclusive, not permission to prune alternatives and verify the rest. [RFD0003](docs/rfds/RFD0003-nondeterministic-choice-and-faulty-links.md) specifies the execution and evidence contract.
+
 ## One property declaration
 
 | Form | Meaning | Evidence |
@@ -125,7 +133,7 @@ Use `--artifacts-dir /path/to/runs` to change the parent directory. The location
 
 Verified properties need no witness; inconclusive runs do not fabricate evidence. `--trace-out` additionally exports one selected witness. Replay against the saved source, for example `fml replay .fml/runs/<run-id>/model.fml .fml/runs/<run-id>/witnesses/0000.json`. Reports are records of checker output, not independently checkable proof certificates.
 
-Replay re-executes actions, compares snapshots and provenance, checks source identity, loop closure and fairness, and independently interprets the property on the trace. Only the current artifact format (**6**) is accepted; regenerate traces after source or format changes. Versioning artifacts does not select runtime behavior.
+Replay re-executes actions, compares snapshots and provenance, checks source identity, loop closure and fairness, and independently interprets the property on the trace. Choice transcripts are replayed exactly, including encounter order, helper call sites, candidate positions, and values. Only the current artifact format (**7**) is accepted; regenerate traces after source or format changes. Versioning artifacts does not select runtime behavior.
 
 Reports support automatic color, `--color always|never|auto`, and `NO_COLOR`. JSON never contains presentation ANSI escapes. The full syntax, precedence, assumptions, limits, and deferred features are in [RFD0002](docs/rfds/RFD0002-functions-and-actors.md).
 
@@ -142,7 +150,8 @@ cargo test --locked
 - generated three-state graphs with shared action identities;
 - FIFO scheduler transitions and cutoffs;
 - all 729 three-state/two-message deterministic transition tables;
-- 160 source-to-verdict Boolean self-message cases using an independent orbit/cycle oracle, including optional input starvation and weak fairness.
+- 160 source-to-verdict Boolean self-message cases using an independent orbit/cycle oracle, including optional input starvation and weak fairness;
+- independent Cartesian enumeration of small choice lists, dependent helper choices/outboxes, branch-specific encounters, and choice-fairness regressions.
 
 Metamorphic regressions check actor renaming, declaration reordering, and persistence of concrete counterexamples under larger mailbox bounds. Inventory reservation and payment idempotency each have a failing model and an atomic-boundary repair, with reachable completion checks.
 
@@ -164,4 +173,4 @@ cargo +nightly fuzz run trace_json -- -max_total_time=120
 
 A separate optional scheduled/manual workflow runs these campaigns and saves artifacts. See the [acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) for completed work and remaining validation.
 
-The [proposed roadmap](docs/rfds/README.md#proposed-roadmap--not-implemented) sketches three sequential milestones: nondeterministic choice and faulty links, bounded dynamic spawning, then explicit suspension and reentrancy. These are designs for review, not currently supported syntax or engine behavior.
+The [RFD roadmap](docs/rfds/README.md) proceeds one milestone at a time: choice and faulty links are implemented; bounded dynamic spawning and explicit suspension/reentrancy remain unimplemented sketches.

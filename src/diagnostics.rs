@@ -110,6 +110,22 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
             )
             .unwrap();
         }
+        for choice in &action.choices {
+            let (line, col) = location(source, choice.span);
+            writeln!(
+                out,
+                "        {}",
+                paint(
+                    &safe(&format!(
+                        "choose #{} [{}] = {} at {}:{line}:{col}",
+                        choice.encounter, choice.candidate, choice.value, file
+                    )),
+                    Tone::Dim,
+                    color,
+                )
+            )
+            .unwrap();
+        }
         let before = &trace.states[i];
         let after = &trace.states[i + 1];
         for (actor, value) in &after.actors {

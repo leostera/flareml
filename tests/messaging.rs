@@ -18,7 +18,7 @@ fn asynchronous_reply_is_a_separate_turn_after_commit() {
     assert_eq!(report.status, Status::VerifiedInScope);
     assert!(report.assumptions.iter().any(|a| a.contains("not durable")));
     let trace = report.witness().unwrap();
-    assert_eq!(trace.format_version, 6);
+    assert_eq!(trace.format_version, flareml::trace::FORMAT_VERSION);
     assert_eq!(trace.actions.len(), 3);
     assert!(!trace.actions[0].fair); // environment is optional
     assert!(trace.actions[1].description.contains("enqueue 1 message"));

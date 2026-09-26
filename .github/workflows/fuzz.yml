@@ -30,6 +30,12 @@ jobs:
           mkdir -p fuzz/corpus/source fuzz/corpus/trace_json
           cp examples/*.fml fuzz/corpus/source/
           cargo run --locked -- check examples/counter-replies.fml --trace-out fuzz/corpus/trace_json/replies.json
+          cargo run --locked -- check examples/faulty-link-duplicate-fixed.fml --property "a duplicate can finish" --trace-out fuzz/corpus/trace_json/duplicate-fixed.json
+          for model in faulty-link-loss faulty-link-duplicate-bug; do
+            code=0
+            cargo run --locked -- check examples/$model.fml --trace-out fuzz/corpus/trace_json/$model.json || code=$?
+            test "$code" -eq 1
+          done
       - name: Coverage-guided sanitizer run
         run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=120 -timeout=10 -rss_limit_mb=2048 -seed=12345
       - uses: actions/upload-artifact@v4
