@@ -2,7 +2,7 @@
 
 Authoritative contract: [RFD0002 — Functions and actors as the modeling core](RFD0002-functions-and-actors.md). Branch: `spike/actor-generalization`.
 
-**Status:** the generic, fault-free actor core is implemented with tests. This is **not full RFD/release acceptance**: the separate product-adapter gate and coverage-instrumented fuzz campaign below remain open. Do not substitute generic mailbox behavior for Cloudflare contracts.
+**Status:** the generic, fault-free actor core is implemented with tests. The newly agreed single-`property` surface is **not implemented**. This is **not full RFD/release acceptance**: claim-syntax migration, the separate product-adapter gate and coverage-instrumented fuzz campaign below remain open. Do not substitute generic mailbox behavior for Cloudflare contracts.
 
 ## Generic language and scheduler
 
@@ -28,6 +28,17 @@ Evidence: [`tests/messaging.rs`](../../tests/messaging.rs), [`tests/actor_harden
 
 Evidence: [`tests/message_observations.rs`](../../tests/message_observations.rs), [`tests/messaging_oracle.rs`](../../tests/messaging_oracle.rs), [`tests/temporal_oracle.rs`](../../tests/temporal_oracle.rs), [`tests/cli.rs`](../../tests/cli.rs).
 
+## Next handoff: one property declaration — not implemented
+
+- [ ] Add top-level `reachable P` with a pure state predicate; keep `exists` as data quantification. Reject bare predicate properties and unsupported nested/mixed reachability/temporal forms.
+- [ ] Classify `property { always P }` as safety when P is a state predicate, preserving initial-state and early successor checks before graph closure; do not misclassify `always eventually P`.
+- [ ] Route `property { reachable P }` through reachability exploration and replay; preserve `REACHED`/`UNREACHABLE` reporting and the existing non-failing cover exit policy. Report missing witnesses as inconclusive on incomplete graphs.
+- [ ] Test the distinction between universal eventuality and existential reachability, zero-step reachability, fair/unfair liveness, short safety failures despite later cutoffs, and rejected mixed formulas.
+- [ ] Define compatibility handling for old `invariant`/`cover` keywords and existing profiles. Version artifacts if their representation changes; retain property selection, source spans and tamper detection.
+- [ ] Migrate the current scenario examples, README and public CLI/JSON tests only when parsing, checking, diagnostics and replay support the new surface end to end. Keep older-profile regression fixtures explicit.
+
+Touchpoints: `src/syntax.rs` (`ClaimKind`, expressions/parser), `src/model.rs` (typing/temporal validation), `src/checker.rs` (safety/cover classification), `src/temporal.rs`, `src/trace.rs`, and `src/diagnostics.rs`. Current source still supports three claim declaration keywords and rejects `reachable`; this handoff changes documentation only.
+
 ## Hardening and compatibility
 
 - [x] Preserve the existing `cf-core-v0`, `actors-v0`, and `actors-v1` regression suite and meanings.
@@ -40,7 +51,7 @@ Evidence: [`tests/message_observations.rs`](../../tests/message_observations.rs)
 
 ## Product-adapter gate — not implemented
 
-RFD0002 implementation step 5 remains open. These are **separate profiles**, not additional behaviors inferred from the generic actor syntax:
+RFD0002 implementation step 6 remains open. These are **separate profiles**, not additional behaviors inferred from the generic actor syntax:
 
 - [ ] Worker trigger/invocation/response and failure contracts, without inventing persistent Worker identity.
 - [ ] Durable Object routing, volatile versus durable state, storage transactions, suspension/gates, restart/eviction behavior and litmus tests.

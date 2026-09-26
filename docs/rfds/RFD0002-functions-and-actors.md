@@ -6,11 +6,13 @@
 - Author: leostera, with AI assistance
 - Start Date: 2026-09-26
 - Updated: 2026-09-26
-- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements the generic `actors-v2` core, including bounded message observations and independent scheduler tests; the earlier synchronous `actors-v1` remains a regression profile. [Acceptance checklist](RFD0002-implementation-checklist.md) records completed core work and remaining adapter/release gates.
+- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements the generic `actors-v2` core, including bounded message observations and independent scheduler tests; the earlier synchronous `actors-v1` remains a regression profile. [Acceptance checklist](RFD0002-implementation-checklist.md) records completed work and remaining gates. The newly agreed single-`property` surface below is **not yet implemented**; the current parser and examples still use `invariant`, `property`, and `cover`.
 
 ## Summary
 
 Use one `actor` declaration for both actors with and without retained state. A stateful actor's `init(args)` produces its initial state; its `handle_message(state, message)` computes the next state. Stateless actors omit `init` and the state argument. Typed `send(address, message)` enqueues a one-way message and returns no reply. A caller that wants a response includes its typed address and a finite correlation ID in the message; the recipient sends a separate response. A callback's state change and outgoing messages commit together, before the recipient can process any of those messages. The first generic messaging profile has finite per-address mailboxes, no loss, duplication, transport faults, restarts, or durability. Fairness and capacity are explicit. Cloudflare Worker, Durable Object, Queue, and storage behaviors require **separate semantic adapters**; none follow from `actor` or `send`. Preserve the finite native checker, temporal properties, source-level witnesses and replay from [RFD0001](RFD0001-initial-language-and-model-checker.md).
+
+Use **one `property` declaration** for safety, temporal requirements and reachability. Explicit operators inside it express the claim: `always P`, `P leads_to Q`, or `reachable P`. There is no implicit interpretation of a bare state predicate. This simplifies the source language without collapsing the checker's distinct safety, temporal and reachability algorithms.
 
 This RFD remains a **Draft**, not a stable product-adapter contract. `actors-v0`, `actors-v1`, and `cf-core-v0` retain their semantics. The generic `actors-v2` implementation now includes typed messages, finite FIFO mailboxes, atomic callback commits, input and bounded lifetime message observations, fairness, replay, and an independent mailbox scheduler oracle. The adapter gate below is still outstanding, and coverage-instrumented fuzzing remains a release task. Faults and restarts are explicitly excluded from this generic profile, not silently approximated or claimed complete.
 
@@ -28,6 +30,7 @@ The desired mental model is closer to an asynchronous receive loop: the actor ow
 - Specify per-address mailbox ordering, delivery, callback atomicity, backpressure/capacity, scheduling, fairness, failure omissions, and reply-before-commit behavior precisely.
 - Preserve distinct Cloudflare resource contracts and the checker's honest `VERIFIED_IN_SCOPE` / `VIOLATED` / `INCONCLUSIVE` results and replayable evidence.
 - Migrate without reinterpreting legacy source profiles or archived traces.
+- One claim declaration, `property`, with explicit temporal or reachability meaning; remove separate `invariant` and `cover` declarations from the target surface.
 
 ## Non-goals
 
@@ -110,6 +113,34 @@ check OneIncrement {
 
 An external `once send(...)` is an optional, finite input. It can be chosen at most once; fairness does **not** force the environment to submit it. After submission, fairness requires continuously enabled mailbox processing to progress. `inputs(Counter)` exposes those input slots; `messages(Client)` includes replies generated later. The cover establishes reachable reply processing, while the properties establish conditional liveness under the declared fairness and finite bounds. Removing fairness produces replayable starvation lassos. `requests(Actor.method)` retains its old meaning in older profiles and is rejected in `actors-v2`.
 
+### One property declaration, explicit meaning
+
+**Agreed target surface; not yet implemented as a whole.** Using the actors above, write:
+
+```fml
+property "a reply is not processed before the counter commits" {
+  always (Client.at(User).state == Observed implies Counter.at(Main).state == 1)
+}
+
+property "submitted increments eventually receive a reply" {
+  forall (i in inputs(Counter)) {
+    i.submitted leads_to Client.at(User).state == Observed
+  }
+}
+
+property "a client can receive a reply" {
+  reachable (Client.at(User).state == Observed)
+}
+```
+
+`always P` is the current invariant: P must hold in every reachable state. `eventually P` requires every execution under the declared assumptions to eventually reach P; `P leads_to Q` requires eventual Q whenever P holds. `reachable P` asks whether **at least one finite execution** reaches a state satisfying P. It does not guarantee that every execution gets there. An initial state satisfying P is already a reachability witness.
+
+`exists` continues to quantify over finite **data**, not executions. For example, `reachable (exists (m in messages(Client)) { m.processed })` asks whether some execution reaches a state with a processed client message. A bare `property "name" { P }` is rejected: write the operator rather than rely on a hidden `always` default. The preceding full example intentionally retains today's runnable syntax until the parser, checker and examples migrate together.
+
+### What starts a check?
+
+`check` describes an experiment, not a function executed as `main()`. The CLI selects one check (using `--check Name` when needed), constructs the finite actor identities, evaluates their pure initializers, then explores optional external submissions and enabled internal message processing. `inputs` defines the environmental entry points; `once send(...)` means at most once, not guaranteed arrival. Weak runtime fairness applies to enabled internal progress, not to optional input submission. There is currently no implicit startup message or dynamic `spawn`. Properties observe these executions; they never inject work to make their claims true.
+
 ### When does `send` happen?
 
 Inside a callback, `send` records an outgoing intent. It does not hand control to the target immediately. At the callback's return transition the checker validates the next state and **atomically** installs the new owned state and enqueues the staged messages, in program order. The target can first process the reply in a later transition, after the counter state is committed. If the callback cannot finish (type error or finite capacity cutoff), it does not partly commit state or partly enqueue messages. This is a **generic model rule**, not a claim that any particular external transport provides an atomic transaction.
@@ -139,6 +170,24 @@ The initial profile rejects external I/O or suspension within a state-transition
 - Nondeterministic choices include optional external inputs and enabled mailbox-head processing for each address. `weak runtime.progress` applies to an individual continuously enabled internal processing action. It does not force optional external submission. FIFO and atomic turns mean the head cannot be skipped by a later message; an empty mailbox does not give rise to a fairness obligation. A self-sending cycle remains a real infinite path, subject to finite bounds and fair scheduling; a permanently blocked turn must not be misreported as merely unfair.
 - Preserve invariants at initial and post-transition states, including after enqueue but before dequeue and after a sender commits but before a recipient runs. Check liveness over fair infinite paths with replayable lassos. The typed observation views below are read-only and specification-only. The existing `requests(Actor.method)` view is **not** silently reinterpreted.
 - State hashing and serialized traces include keyed state, ordered mailbox contents, input-slot status, correlation-bearing messages, profile and limits, action labels and source/check identity. Retain distinct enabled edges even if they lead to equal data states. Replay re-executes each submission and callback commit, verifies ordering, state/outbox changes, source identity, loop closure and fairness. Trace layout changes require a format bump or explicit migration; old artifacts must not be silently accepted under new semantics.
+
+### Property classification, reporting and migration
+
+The single declaration is a surface simplification, not arbitrary branching-time logic. Preserve the existing restricted temporal fragment from RFD0001 and classify the expression internally:
+
+| Target expression | Internal obligation | Evidence/result |
+| --- | --- | --- |
+| `always P`, with state predicate P | Safety, equivalent to today's invariant | Check initial and every successor state; a finite bad prefix or verification in scope |
+| Existing temporal forms, e.g. `eventually P`, `P leads_to Q`, `always eventually P` | Temporal | Existing finite-prefix/fair-lasso algorithms and replay |
+| `reachable P`, with state predicate P | Reachability, equivalent to today's cover | A finite witness (`REACHED`), or `UNREACHABLE` only after complete exploration |
+
+Only a **whole property body** of the form `reachable P` is admitted initially. P may contain pure Boolean operators and finite data quantifiers but no temporal or reachability operators. Reject `always (reachable P)`, `reachable (eventually P)`, and mixtures of reachability and temporal clauses; do not interpret them as an unchecked extension to the supported logic. Existing conjunctions and stable `forall` of temporal clauses remain supported. In particular, `always eventually P` must not be mistaken for the safety-only `always P` case.
+
+Safety and reachability use the full reachable graph: fairness must not prune bad prefixes or reachable states. Liveness continues to use the declared fairness assumptions. Route safety-only `always P` through the invariant checking path so a short violation can still be found before graph closure or a later exploration cutoff. A reached witness remains valid during incomplete exploration; absence of a witness is not `UNREACHABLE` unless the graph is closed. Cutoffs remain inconclusive, never evidence of success or impossibility.
+
+Preserve the existing cover reporting/exit policy for the initial migration: `reachable P` is a reachability query with `REACHED`/`UNREACHABLE`, not an automatic safety violation or nonzero exit when unreachable. Requiring reachability as a pass/fail gate would be a separate explicit policy decision, not an accidental consequence of renaming the declaration. A common `property` keyword does not require hiding the internal obligation kind in diagnostics or artifacts.
+
+Migration rules are `invariant "n" { P }` to `property "n" { always P }`, and `cover "n" { P }` to `property "n" { reachable P }`; existing temporal properties keep their expressions. Keep the old forms in the existing regression profiles. Before removing them from new models, specify the language/profile compatibility boundary and diagnostics; do not silently break old source under an unchanged contract. Preserve source locations, property selection, finite and lasso witness validation, and trace compatibility checks. If the claim representation or artifact layout changes, version the trace format explicitly. The current implementation still has separate `ClaimKind` variants and no `reachable` operator; these rules are implementation work, not a claim of present support.
 
 ### Stable observations and temporal bindings
 
@@ -171,7 +220,8 @@ Models cannot execute arbitrary host code or network operations. Enforce typed a
 2. Implement unified actor declarations, pure typed `init`, state-value callback parameters, full-branch next-state typing, and typed address/message protocols. Add stateless, singleton and keyed fixtures; reject calls to unavailable protocols and state/capability escape.
 3. Add the mailbox/outbox state and source-ordered staged `send` effects; expose input acceptance and atomic callback commit as separate actions. Test two senders to one target, two target keys, send-to-self, replies with correlation IDs, the impossibility of a reply processing before the sender commits, capacity `INCONCLUSIVE` and forbidden I/O/suspension inside the callback.
 4. Extend safety/temporal observations, fairness and replay for the new action families. Cross-check tiny graphs with an independent oracle and fuzz source/trace JSON. Include fair and unfair progress fixtures, a non-vacuous reply property and a replayable failed invariant. Validate colored/`NO_COLOR` CLI and ANSI-free JSON.
-5. Only after generic semantics pass, design separate Cloudflare Worker/DO and Queue adapters with product litmus tests. Do not label the generic profile as implementing either adapter. Resolve the old `worker` shim and migration plan before declaring the core stable.
+5. Implement the single-`property` surface and `reachable` classification described above. Preserve early invariant failures, reachability reporting, fair temporal witnesses, property selection and replay; test invalid bare predicates and mixed execution quantifiers. Migrate current examples and documentation only once the complete source-to-checker path works, while keeping older-profile regression fixtures.
+6. Only after generic semantics pass, design separate Cloudflare Worker/DO and Queue adapters with product litmus tests. Do not label the generic profile as implementing either adapter. Resolve the old `worker` shim and migration plan before declaring the core stable.
 
 Run `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, CLI checks of both passing and failing `.fml` fixtures, and replay after each end-to-end increment. Keep a new syntax feature rejected rather than accepted with unimplemented checking.
 
@@ -183,6 +233,7 @@ Run `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `
 - Explicit reply addresses and correlation IDs add model code. They reveal ordering and duplicate-response bugs that implicit RPC can hide, but may warrant a separately specified convenience layer later.
 - Every finite address, message, queue position and possible send increases state space. Honest limits may make useful checks inconclusive.
 - Versioning and preserving the synchronous `actors-v1` slice increases maintenance cost during migration.
+- A single `property` keyword reduces declaration vocabulary but makes the `eventually` versus `reachable` distinction more important to teach. It does not remove different algorithms or verdicts internally.
 
 ## Rationale and alternatives
 
@@ -196,6 +247,9 @@ Keep `actors-v1`, rename `stateless actor`/`stateful actor` to `actor`, and reta
 
 ### Other alternatives
 
+- **Keep `invariant`, `property`, and `cover` declarations:** makes internal classifications visible but asks users to learn three entry points for claims. Prefer one declaration with explicit operators.
+- **Treat a bare property predicate as an invariant:** shorter, but hides universal safety behind an implicit default. Require `always`.
+- **Use `exists` for an execution path:** conflates data quantification with path quantification. Use `reachable`, initially only at the top level.
 - **Implicit mutable `state` inside a handler:** concise, but a bare expression such as `state + 1` does not say whether it changes owned state. An explicit returned next state makes that unambiguous.
 - **Use `handle_call` with automatic reply tokens:** useful OTP precedent, but conflates the primitive actor mailbox with a synchronous protocol. Could be an explicitly versioned layer on top of messages, not a silent property of every actor.
 - **Expose `send` immediately while a callback runs:** allows a target to act on a reply before the sender's new state is installed. More faithful to some runtimes, but harder to reason about; represent it in an adapter that splits publication and commit if needed.
@@ -225,9 +279,15 @@ Keep the synchronous spike as the core. It is useful for fault-free direct calls
 - `Address<ActorName>` remains the transferable reference. Singleton names are addresses. Legacy `worker` and synchronous profiles remain frozen regression frontends, with explicit non-mechanical migration.
 - Stable input and optional lifetime message observations as specified above. Processing action IDs are derived from typed target addresses (not growing sequence numbers); FIFO plus weak fairness ensures each queued head progresses. Envelope source spans and observation/input identities are retained for replay.
 
+### Agreed surface direction, not yet implemented
+
+- One `property` declaration with explicit `always`, supported temporal forms, or top-level `reachable`. No implicit bare-predicate semantics and no arbitrary mixing of path quantifiers.
+- Implement and test classification/reporting/replay before migrating examples. Decide the compatibility boundary for old claim keywords; preserve older-profile meanings and artifacts.
+
 ### Remaining acceptance work
 
-- The separate product-adapter gate in implementation step 5 is not implemented. Specify and independently validate Worker/DO suspension, storage/restart/gate rules and Queue attempt/ack/retry rules before introducing those profiles. Decide adapter registration then; D1 remains built in under `cf-core-v0`.
+- The single-`property` surface in implementation step 5 is not implemented.
+- The separate product-adapter gate in implementation step 6 is not implemented. Specify and independently validate Worker/DO suspension, storage/restart/gate rules and Queue attempt/ack/retry rules before introducing those profiles. Decide adapter registration then; D1 remains built in under `cf-core-v0`.
 - Run coverage-instrumented source/replay fuzz campaigns on a nightly toolchain and review this profile before treating the draft as stable. The local smoke runs use stable libFuzzer binaries without coverage instrumentation and do not satisfy this gate.
 - Independent mailbox and temporal oracles, negative effect/capability tests, and replay checks improve confidence but are not a proof of checker correctness. Keep their corpora reproducible as the language evolves.
 
@@ -237,5 +297,7 @@ Keep the synchronous spike as the core. It is useful for fault-free direct calls
 - A Cloudflare Worker/DO/Queue equivalence claim, durable outbox, transport retry/uncertain delivery or synchronous RPC without a separately specified backend/profile.
 
 ## Future possibilities
+
+The intended library direction is local file imports, namespaces, reusable actor definitions and explicit finite static instances before dynamic spawning. Resource models such as buckets or databases can then be libraries rather than product-specific core syntax where their behavior is expressible. Module syntax, instance typing, initialization parameters and imported-source replay identity need a separate design; none is currently implemented. Libraries must still specify actual consistency, scheduling and failure behavior, not inherit guarantees from a product name. Review the generic-core merge boundary separately from delivery of those libraries/adapters; their absence must stay documented, not be disguised as completed product support.
 
 A typed `request`/`reply` library could synthesize addresses and correlation IDs over `send` once its timeout, duplicate and failure semantics are explicit. Backend adapters could add DO persistence/gates, Queue retries or other systems without disguising their guarantees as the generic actor core. Richer temporal quantification, symmetry and partial-order reductions remain useful later, but none justify silently weakening today's exact finite-check results.
