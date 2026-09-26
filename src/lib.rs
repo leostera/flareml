@@ -4,6 +4,7 @@ pub mod choices;
 mod claims;
 pub mod diagnostics;
 mod evaluation;
+pub mod explorer;
 mod functions;
 pub mod graph;
 mod messaging;

@@ -15,7 +15,9 @@ fml check model.fml --check Scenario --property "claim name"
 fml check model.fml --max-states 100000 --max-depth 1000 --timeout 30s
 fml check model.fml --format json --artifacts-dir /tmp/fml-runs
 fml check model.fml --trace-out witness.json  # optional extra export of one witness
-fml replay .fml/runs/<run-id>/model.fml .fml/runs/<run-id>/witnesses/0000.json --format json
+fml replay .fml/runs/<run-id> --format json
+fml replay .fml/runs/<run-id> --ui
+fml replay .fml/runs/<run-id> --witness 1 --ui --no-open
 fml --version
 fml skills actors
 fml skills --install
@@ -34,6 +36,8 @@ fml skills --install
 A `reachable P` query returning `UNREACHABLE` is informational and not a failing exit. Only a **complete** explored graph establishes absence. A reached witness is valid even if further exploration hits a bound. A whole `always P` can fail as soon as an initial/successor bad state is found, before graph closure; most temporal properties require a complete finite graph for a definitive result. A timeout or cutoff is never proof. State-space search uses exact state equality without symbolic, symmetry, or partial-order reductions. Default budgets are 100000 states, depth 1000, and 30s (cooperative timeout).
 
 ## Run bundles, evidence, and replay
+
+`fml replay <run-directory>` loads its bundled `model.fml` and first saved witness from `report.json`. `--witness N` selects a zero-based entry in the saved witness list, not a filename number. Runs with no witnesses cannot be replayed. Explicit `fml replay <model.fml> <trace.json>` remains supported. `fml check model.fml --ui` opens the explorer after saving artifacts if a property violation is found; passing checks do not launch it. The violation exit code remains 1 after the server closes. Add `--ui` to replay to open the embedded offline explorer, or `--ui --no-open` to print its private session URL. Bundle UI replay loads all saved witnesses into a shared-prefix tree; `--witness N` chooses the initial execution. The tree represents saved evidence, not all explored paths. Keep the complete URL, including its `#` token. Ctrl-C stops the local server.
 
 Each completed run bundle contains `model.fml` (the exact source snapshot), `configuration.json` (selected model/check/property, state/depth/timeout limits, tool version, and source SHA-256), and `report.json` (status, completeness, cutoff, and an index of all available witness files). Each available witness is stored under `witnesses/0000.json`, `witnesses/0001.json`, etc.; names are numeric, never taken from property names. `report.json` is written last as a completion marker; its absence means bundle creation did not finish, **not** that a model is verified. Invalid models and initialization errors also produce error reports after a successful source read. Unreadable source or unwritable artifact storage returns a tool error (exit 4) without claiming verification. Bundles are records of checker output, not independently checkable proof certificates or a power-loss durability guarantee.
 

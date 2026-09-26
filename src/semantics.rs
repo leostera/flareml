@@ -140,6 +140,8 @@ pub struct Action {
 pub struct Step {
     pub action: Action,
     pub state: State,
+    /// Optional presentation capture; never part of model state or trace artifacts.
+    pub(crate) outbox: Option<Outbox>,
 }
 
 impl Program {

@@ -1,3 +1,4 @@
+mod explorer_server;
 mod run_artifacts;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -89,14 +90,31 @@ enum Command {
         /// Save a counterexample, or a reached witness if no violation was found.
         #[arg(long)]
         trace_out: Option<PathBuf>,
+        /// Open the trace explorer if a property violation is found.
+        #[arg(long, conflicts_with = "format")]
+        ui: bool,
+        /// Print the explorer URL without launching a browser.
+        #[arg(long, requires = "ui")]
+        no_open: bool,
         /// Parent directory for automatically saved, uniquely named run bundles.
         #[arg(long, default_value = ".fml/runs")]
         artifacts_dir: PathBuf,
     },
     /// Re-execute a current-format trace and validate its evidence.
     Replay {
+        /// Model source, or a saved run directory containing model.fml and report.json.
         model: PathBuf,
-        trace: PathBuf,
+        /// Trace JSON (omit when replaying a run directory).
+        trace: Option<PathBuf>,
+        /// Zero-based index in the run's saved witness list (defaults to the first).
+        #[arg(long, conflicts_with = "trace")]
+        witness: Option<usize>,
+        /// Open the embedded, local interactive trace explorer.
+        #[arg(long, conflicts_with = "format")]
+        ui: bool,
+        /// Print the explorer URL without launching a browser.
+        #[arg(long, requires = "ui")]
+        no_open: bool,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
     },
@@ -215,6 +233,53 @@ fn error(format: Format, color: Color, status: &str, error: &Error, path: &Path,
         );
     }
 }
+fn replay_paths(
+    model: &Path,
+    trace: Option<&Path>,
+    witness: Option<usize>,
+) -> Result<(PathBuf, PathBuf), String> {
+    if let Some(trace) = trace {
+        return Ok((model.to_owned(), trace.to_owned()));
+    }
+    if !model.is_dir() {
+        return Err("provide a run directory, or both a model file and a trace JSON file".into());
+    }
+    let report: serde_json::Value =
+        serde_json::from_str(&read(&model.join("report.json"), 16_000_000)?)
+            .map_err(|e| format!("invalid run report: {e}"))?;
+    let entries = report["witness_files"]
+        .as_array()
+        .ok_or("run report has no saved witness list")?;
+    if entries.is_empty() {
+        return Err("this run has no saved witnesses to replay; verified claims do not have execution traces".into());
+    }
+    let index = witness.unwrap_or(0);
+    let entry = entries.get(index).ok_or_else(|| {
+        format!(
+            "witness index {index} out of range; this run has {} saved witnesses (indices 0–{})",
+            entries.len(),
+            entries.len() - 1
+        )
+    })?;
+    let relative = entry["path"]
+        .as_str()
+        .ok_or("invalid witness path in run report")?;
+    let filename = relative
+        .strip_prefix("witnesses/")
+        .and_then(|s| s.strip_suffix(".json"))
+        .filter(|s| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()))
+        .ok_or("invalid witness path in run report; expected witnesses/<digits>.json")?;
+    eprintln!(
+        "Replaying witness {index} of {}: {} (use --witness N to select another)",
+        entries.len(),
+        entry["claim"]
+    );
+    Ok((
+        model.join("model.fml"),
+        model.join("witnesses").join(format!("{filename}.json")),
+    ))
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     if let Command::Skills { install, topic } = &cli.command {
@@ -243,6 +308,31 @@ fn main() -> ExitCode {
             (model, *format)
         }
     };
+    let replay = if let Command::Replay {
+        model,
+        trace,
+        witness,
+        ..
+    } = &cli.command
+    {
+        match replay_paths(model, trace.as_deref(), *witness) {
+            Ok(paths) => Some(paths),
+            Err(message) => {
+                error(
+                    format,
+                    cli.color,
+                    "TOOL_ERROR",
+                    &Error::new(Span::default(), message),
+                    path,
+                    "",
+                );
+                return ExitCode::from(4);
+            }
+        }
+    } else {
+        None
+    };
+    let path = replay.as_ref().map(|(model, _)| model).unwrap_or(path);
     let source = match read(path, 1_000_000) {
         Ok(s) => s,
         Err(e) => {
@@ -316,6 +406,8 @@ fn main() -> ExitCode {
             max_depth,
             timeout,
             trace_out,
+            ui,
+            no_open,
             ..
         } => {
             let p = match flareml::compile(&source, selected.as_deref()) {
@@ -401,19 +493,139 @@ fn main() -> ExitCode {
                     )
                 ),
             }
+            if *ui && report.status == checker::Status::Violated {
+                let result = (|| -> std::result::Result<(), Error> {
+                    let primary = report.witness().ok_or_else(|| {
+                        Error::new(Span::default(), "violation has no saved witness")
+                    })?;
+                    let traces: Vec<_> = std::iter::once(primary)
+                        .chain(
+                            report
+                                .claims
+                                .iter()
+                                .filter_map(|c| c.witness.as_ref())
+                                .filter(|t| !std::ptr::eq(*t, primary)),
+                        )
+                        .collect();
+                    if traces.len() > 128 {
+                        return Err(Error::new(
+                            Span::default(),
+                            "explorer limit: more than 128 witnesses; replay an explicit trace",
+                        ));
+                    }
+                    let mut bytes = 0;
+                    for trace in &traces {
+                        let size = serde_json::to_vec(trace)
+                            .expect("trace serialization")
+                            .len();
+                        bytes += size;
+                        if size > 16_000_000 || bytes > 64_000_000 {
+                            return Err(Error::new(
+                                Span::default(),
+                                "explorer limit: evidence too large; use text replay",
+                            ));
+                        }
+                    }
+                    let mut session =
+                        flareml::explorer::Session::validated(source.clone(), primary.clone(), &p)?;
+                    for trace in traces.into_iter().skip(1) {
+                        session.add_witness(flareml::explorer::Session::validated(
+                            source.clone(),
+                            trace.clone(),
+                            &p,
+                        )?);
+                    }
+                    explorer_server::serve(session, *no_open)
+                        .map_err(|e| Error::new(Span::default(), e))
+                })();
+                if let Err(e) = result {
+                    return fail("TOOL_ERROR", &e, &source);
+                }
+            }
             ExitCode::from(report.status.exit_code())
         }
-        Command::Replay { trace, .. } => {
-            let result = (|| -> std::result::Result<Trace, Error> {
-                let data = read(trace, 16_000_000).map_err(|e| Error::new(Span::default(), e))?;
+        Command::Replay {
+            model,
+            trace,
+            witness,
+            ui,
+            no_open,
+            ..
+        } => {
+            let result = (|| -> std::result::Result<(Trace, flareml::model::Program), Error> {
+                let data = read(&replay.as_ref().unwrap().1, 16_000_000)
+                    .map_err(|e| Error::new(Span::default(), e))?;
                 let artifact: Trace = serde_json::from_str(&data)
                     .map_err(|e| Error::new(Span::default(), format!("invalid trace JSON: {e}")))?;
                 let p = flareml::compile(&source, Some(&artifact.check))?;
-                artifact.validate(&source, &p)?;
-                Ok(artifact)
+                if !ui {
+                    artifact.validate(&source, &p)?;
+                }
+                Ok((artifact, p))
             })();
             match result {
-                Ok(t) => {
+                Ok((t, p)) => {
+                    if *ui {
+                        let mut session =
+                            match flareml::explorer::Session::validated(source.clone(), t, &p) {
+                                Ok(session) => session,
+                                Err(e) => return fail("TOOL_ERROR", &e, &source),
+                            };
+                        if trace.is_none() {
+                            let load = (|| -> std::result::Result<(), String> {
+                                let report: serde_json::Value = serde_json::from_str(&read(
+                                    &model.join("report.json"),
+                                    16_000_000,
+                                )?)
+                                .map_err(|e| e.to_string())?;
+                                let count = report["witness_files"]
+                                    .as_array()
+                                    .ok_or("missing witness list")?
+                                    .len();
+                                if count > 128 {
+                                    return Err("explorer limit: more than 128 saved witnesses; use explicit model/trace paths".into());
+                                }
+                                let mut bytes = 0;
+                                for index in 0..count {
+                                    if index == witness.unwrap_or(0) {
+                                        continue;
+                                    }
+                                    let (_, trace_path) = replay_paths(model, None, Some(index))?;
+                                    let data = read(&trace_path, 16_000_000)?;
+                                    bytes += data.len();
+                                    if bytes > 64_000_000 {
+                                        return Err("explorer limit: saved witnesses exceed 64 MB; use explicit model/trace paths".into());
+                                    }
+                                    let artifact: Trace =
+                                        serde_json::from_str(&data).map_err(|e| e.to_string())?;
+                                    let program = flareml::compile(&source, Some(&artifact.check))
+                                        .map_err(|e| format!("{e:?}"))?;
+                                    session.add_witness(
+                                        flareml::explorer::Session::validated(
+                                            source.clone(),
+                                            artifact,
+                                            &program,
+                                        )
+                                        .map_err(|e| format!("{e:?}"))?,
+                                    );
+                                }
+                                Ok(())
+                            })();
+                            if let Err(message) = load {
+                                return fail(
+                                    "TOOL_ERROR",
+                                    &Error::new(Span::default(), message),
+                                    &source,
+                                );
+                            }
+                        }
+                        return match explorer_server::serve(session, *no_open) {
+                            Ok(()) => ExitCode::SUCCESS,
+                            Err(message) => {
+                                fail("TOOL_ERROR", &Error::new(Span::default(), message), &source)
+                            }
+                        };
+                    }
                     match format {
                         Format::Json => println!(
                             "{}",

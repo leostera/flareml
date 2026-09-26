@@ -1,0 +1,168 @@
+{
+  "metadata": {
+    "check": "C",
+    "claim": "</script><img src=x>",
+    "clause": null,
+    "fair": true,
+    "kind": "Cover",
+    "loop_start": null,
+    "mailbox_bound": 1,
+    "message_bound": null,
+    "property": {
+      "column": 136,
+      "end": 199,
+      "line": 2,
+      "start": 148,
+      "text": "(exists (a in instances(A)) { a.state == Some(0) })"
+    },
+    "schema_version": 1,
+    "snapshots": 2,
+    "source": "// λ 漢字\nactor A { init(): Int { 9223372036854775807 } handle_message(s: Int, m: unit): Int { 0 } } property \"</script><img src=x>\" { reachable (exists (a in instances(A)) { a.state == Some(0) }) } check C { domain Int = [0,9223372036854775807] spawn_bound A = 1 mailbox_bound = 1 main { let a = spawn(A); send(a, ()); } fairness { weak runtime.progress } }",
+    "source_hash": "b957896b9d132324a53d905207889e83bad20ea575d639892d00ef2a39326dab",
+    "spawn_bounds": {
+      "A": 1
+    },
+    "tool_version": "0.3.0",
+    "trace_version": 8
+  },
+  "snapshots": [
+    {
+      "actors": [
+        {
+          "id": "actor:A:0",
+          "label": "A[instance #0]",
+          "mailbox": [
+            {
+              "id": "envelope:0:0",
+              "input": null,
+              "observation": null,
+              "payload": "Unit",
+              "source": {
+                "column": 298,
+                "end": 321,
+                "line": 2,
+                "start": 310,
+                "text": "send(a, ())"
+              }
+            }
+          ],
+          "name": "A",
+          "slot": 0,
+          "state": {
+            "Int": "9223372036854775807"
+          },
+          "stateful": true
+        }
+      ],
+      "event": {
+        "actor": null,
+        "choices": [],
+        "consumed": null,
+        "kind": "setup",
+        "sends": [
+          {
+            "id": "envelope:0:0",
+            "payload": "Unit",
+            "source": {
+              "column": 298,
+              "end": 321,
+              "line": 2,
+              "start": 310,
+              "text": "send(a, ())"
+            },
+            "target": "actor:A:0"
+          }
+        ],
+        "source": null,
+        "spawns": [
+          {
+            "actor": "actor:A:0",
+            "arguments": [],
+            "calls": [],
+            "initial": {
+              "Int": "9223372036854775807"
+            },
+            "source": {
+              "column": 288,
+              "end": 308,
+              "line": 2,
+              "start": 300,
+              "text": "spawn(A)"
+            }
+          }
+        ]
+      },
+      "index": 0,
+      "inputs": [],
+      "messages": {},
+      "processed": [],
+      "submitted": []
+    },
+    {
+      "actors": [
+        {
+          "id": "actor:A:0",
+          "label": "A[instance #0]",
+          "mailbox": [],
+          "name": "A",
+          "slot": 0,
+          "state": {
+            "Int": "0"
+          },
+          "stateful": true
+        }
+      ],
+      "event": {
+        "actor": "actor:A:0",
+        "choices": [],
+        "consumed": {
+          "id": "envelope:0:0",
+          "input": null,
+          "observation": null,
+          "payload": "Unit",
+          "source": {
+            "column": 298,
+            "end": 321,
+            "line": 2,
+            "start": 310,
+            "text": "send(a, ())"
+          }
+        },
+        "kind": "process",
+        "sends": [],
+        "source": {
+          "column": 47,
+          "end": 73,
+          "line": 2,
+          "start": 59,
+          "text": "handle_message"
+        },
+        "spawns": []
+      },
+      "index": 1,
+      "inputs": [],
+      "messages": {},
+      "processed": [],
+      "submitted": []
+    }
+  ],
+  "summaries": {
+    "items": [
+      {
+        "actor": null,
+        "choices": 0,
+        "index": 0,
+        "kind": "setup",
+        "spawns": 1
+      },
+      {
+        "actor": "actor:A:0",
+        "choices": 0,
+        "index": 1,
+        "kind": "process",
+        "spawns": 0
+      }
+    ],
+    "total": 2
+  }
+}

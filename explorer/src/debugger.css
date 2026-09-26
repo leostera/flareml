@@ -1,0 +1,224 @@
+.app main {
+  grid-template-columns: 245px minmax(280px, 1fr) 385px;
+}
+.nav-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e7eaee;
+  margin: -6px 0 22px;
+  padding-bottom: 8px;
+}
+.nav-tabs button {
+  flex: 1;
+  text-align: center;
+  color: #7d8994;
+}
+.nav-tabs [aria-selected="true"] {
+  background: #eaf0f6;
+  color: #345b7e;
+}
+.entity-filter {
+  border: 1px solid #e1e6eb;
+  border-radius: 5px;
+  padding: 9px;
+  width: 100%;
+  font: inherit;
+}
+.entity-list {
+  overflow: auto;
+  margin-top: 14px;
+}
+.entity-list > button {
+  display: block;
+  width: 100%;
+  padding: 12px 10px;
+}
+.entity-list strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+}
+.entity-list small {
+  display: block;
+  margin-top: 5px;
+}
+.entity-list .selected {
+  background: #eaf0f6;
+}
+.react-flow__node.changed-entity {
+  border-color: #bfa66f;
+  background: #fffdf6;
+}
+.react-flow__node.changed-entity.selected {
+  border-color: #668eb7;
+}
+.debugger {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.debugger > section {
+  padding: 20px;
+  overflow: auto;
+}
+.debugger .transition-panel,
+.debugger .entity-panel {
+  flex: 1;
+  min-height: 0;
+}
+.debugger .entity-panel {
+  border-top: 1px solid #dce3e9;
+}
+.debugger .property-detail {
+  flex: 0 1 auto;
+  max-height: 35%;
+  border-bottom: 1px solid #e7eaee;
+  background: #f9fafb;
+}
+.debugger .property-detail.violation {
+  background: #fff7f7;
+  border-left: 3px solid #c77575;
+}
+.debugger h2 {
+  margin-bottom: 12px;
+}
+.debugger h3 {
+  margin-top: 20px;
+}
+.debugger .transition-summary {
+  font-size: 12px;
+  color: #677788;
+}
+.state-fields > small {
+  display: block;
+  margin-bottom: 12px;
+}
+.state-field {
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f3f5;
+}
+.state-field > span {
+  color: #68788a;
+  font-size: 12px;
+}
+.state-field code {
+  text-align: right;
+  max-width: 70%;
+}
+.field-change {
+  font-size: 12px;
+  margin: 8px 0;
+}
+.field-change > span {
+  display: block;
+  color: #71808f;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.field-change del {
+  color: #a14f57;
+  text-decoration: none;
+  background: #fff1f2;
+  padding: 2px 4px;
+}
+.field-change ins {
+  color: #38745b;
+  text-decoration: none;
+  background: #eef8f2;
+  padding: 2px 4px;
+}
+.field-change > div {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.change-card {
+  border-left: 2px solid #d6b876;
+  padding: 4px 0 4px 12px;
+  margin: 12px 0;
+}
+.change-card > button {
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #456782;
+}
+.change-card p {
+  font-size: 11px;
+  margin: 7px 0;
+}
+.event-line {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.event-line > button {
+  padding: 0;
+  color: #54718b;
+  font-size: 11px;
+}
+.event-line code {
+  line-height: 1.7;
+}
+.model-value {
+  background: #f7f9fb;
+  font-size: 12px;
+}
+.message-detail summary {
+  line-height: 1.7;
+}
+.debugger details > pre {
+  max-height: 260px;
+  overflow: auto;
+}
+.evidence-note {
+  position: absolute;
+  right: 20px;
+  top: 50px;
+  z-index: 15;
+  max-width: 480px;
+  background: white;
+  border: 1px solid #dce3e9;
+  box-shadow: 0 8px 25px #0001;
+  padding: 18px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.timeline-top .timeline-hint {
+  flex: none;
+  font-size: 11px;
+  color: #929aa4;
+}
+header > button {
+  font-size: 11px;
+}
+@media (max-width: 1050px) {
+  .app main {
+    grid-template-columns: 200px minmax(230px, 1fr) 330px;
+  }
+}
+@media (max-width: 750px) {
+  .app main {
+    grid-template-columns: 150px minmax(0, 1fr);
+    height: auto;
+  }
+  .system {
+    height: 430px;
+  }
+  .debugger {
+    position: static;
+    grid-column: 1/-1;
+    width: auto;
+    height: 650px;
+    box-shadow: none;
+  }
+  .timeline-top .timeline-hint {
+    display: none;
+  }
+}

@@ -7,6 +7,12 @@ use crate::{
 };
 impl Program {
     pub(crate) fn initial_messages(&self, budget: Option<&crate::graph::Budget>) -> Result<State> {
+        self.initial_recorded(budget).map(|(state, _, _)| state)
+    }
+    pub(crate) fn initial_recorded(
+        &self,
+        budget: Option<&crate::graph::Budget>,
+    ) -> Result<(State, crate::semantics::Outbox, Vec<crate::spawning::Spawn>)> {
         let empty = State::default();
         let main = &self.functions[&self.check.main];
         let mut outcomes =
@@ -26,7 +32,7 @@ impl Program {
         state.input_submitted = vec![false; turn.inputs.len()];
         state.input_processed = vec![false; turn.inputs.len()];
         state.inputs = turn.inputs;
-        Ok(state)
+        Ok((state, turn.outbox, turn.spawns))
     }
     /// Called only on a private state clone; failure never publishes a partial turn.
     fn publish(&self, next: &mut State, turn: &Turn<'_>) -> Result<()> {
@@ -70,6 +76,15 @@ impl Program {
         budget: Option<&crate::graph::Budget>,
         replay: Option<&Action>,
     ) -> Result<Vec<Step>> {
+        self.message_successors_recorded(s, budget, replay, false)
+    }
+    pub(crate) fn message_successors_recorded(
+        &self,
+        s: &State,
+        budget: Option<&crate::graph::Budget>,
+        replay: Option<&Action>,
+        record: bool,
+    ) -> Result<Vec<Step>> {
         let mut steps = vec![Step {
             action: Action {
                 id: "stutter".into(),
@@ -80,6 +95,7 @@ impl Program {
                 spawns: Vec::new(),
             },
             state: s.clone(),
+            outbox: record.then(Vec::new),
         }];
         for (i, input) in s.inputs.iter().enumerate() {
             if let Some(budget) = budget {
@@ -110,6 +126,8 @@ impl Program {
                     spawns: Vec::new(),
                 },
                 state: next,
+                outbox: record
+                    .then(|| vec![(input.target.clone(), input.payload.clone(), input.source)]),
             });
         }
         for (address, queue) in &s.mailboxes {
@@ -186,7 +204,7 @@ impl Program {
                     id: processing_id(address),
                     description: format!("process {} at {address}; commit {next_state}; enqueue {} message(s) [{}]", envelope.payload, sends.len(), sends.join(", ")),
                     span: function.span, fair: self.check.fair, choices: turn.choices, spawns: turn.spawns,
-                }, state: next });
+                }, state: next, outbox: record.then_some(turn.outbox) });
             }
         }
         Ok(steps)

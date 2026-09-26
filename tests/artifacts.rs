@@ -53,6 +53,35 @@ fn saves_every_witness_with_safe_filenames_and_replays_snapshot() {
     );
     fs::write(&source, "changed after run").unwrap();
     assert_eq!(fs::read_to_string(run.join("model.fml")).unwrap(), text);
+    for (args, expected) in [
+        (vec![], "../../escaped"),
+        (vec!["--witness", "1"], "second"),
+    ] {
+        let replayed = Command::new(env!("CARGO_BIN_EXE_fml"))
+            .arg("replay")
+            .arg(run)
+            .args(args)
+            .args(["--format", "json"])
+            .output()
+            .unwrap();
+        assert!(
+            replayed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&replayed.stderr)
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&replayed.stdout).unwrap()["claim"],
+            expected
+        );
+    }
+    let invalid = Command::new(env!("CARGO_BIN_EXE_fml"))
+        .arg("replay")
+        .arg(run)
+        .args(["--witness", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("out of range"));
     for witness in report["witness_files"].as_array().unwrap() {
         let path = run.join(witness["path"].as_str().unwrap());
         assert!(replay(run, &path).status.success());
@@ -77,6 +106,13 @@ fn persists_incomplete_and_invalid_runs_without_fabricating_witnesses() {
     assert_eq!(report["complete"], false);
     assert!(report["cutoff"].is_string());
     assert_eq!(report["witness_files"], serde_json::json!([]));
+    let replayed = Command::new(env!("CARGO_BIN_EXE_fml"))
+        .arg("replay")
+        .arg(run)
+        .output()
+        .unwrap();
+    assert_eq!(replayed.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&replayed.stderr).contains("no saved witnesses"));
     fs::write(&source, "not a model").unwrap();
     assert_eq!(check(&source, &root, &[]).status.code(), Some(2));
     let reports: Vec<_> = fs::read_dir(&root)

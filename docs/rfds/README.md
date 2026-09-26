@@ -7,11 +7,12 @@
 - [RFD0003 — Nondeterministic choice and faulty links](RFD0003-nondeterministic-choice-and-faulty-links.md): finite `choose`, branch-local atomic turns, choice replay evidence, faulty-link examples, and recorded validation/measurements.
 - [RFD0004 — Explicit populations and bounded actor spawning](RFD0004-bounded-spawn.md): actor definitions, deterministic `check.main`, shared lifetime creation pools, atomic allocation, stable future-instance observations, and format-8 replay.
 
-## Next sketches — not implemented
+## Next proposals — not implemented
 
-Implement and validate these one at a time, in order. Writing the sketches does not change the current contract.
+Implement and validate these one at a time in the order below, not numeric order. Writing a proposal does not change the current contract.
 
-1. [RFD0005 — Suspension, atomic boundaries, and reentrancy](RFD0005-suspension-and-reentrancy.md): explicit segments, non-reentrant defaults, possible opt-in overlapping invocations, and a shared-memory design study. Blocking state-publication, wakeup, and fairness questions remain.
+1. [RFD0006 — Embedded interactive trace explorer](RFD0006-trace-explorer.md): root-level Bun/React/TypeScript app, React Flow system view, step/state/queue inspection, Rust-validated replay projection, and offline assets embedded in `fml replay --ui`. Future WASM validation is an option, not a prerequisite.
+2. [RFD0005 — Suspension, atomic boundaries, and reentrancy](RFD0005-suspension-and-reentrancy.md): deferred until after the explorer; explicit segments, non-reentrant defaults, possible opt-in overlapping invocations, and a shared-memory design study. Blocking state-publication, wakeup, and fairness questions remain.
 
 Each milestone requires a refined contract, checked examples, independent validation, replay/tamper coverage, and recorded evidence before proceeding. Constants and library/import design remain separate proposals, not implicit dependencies of these RFDs.
 

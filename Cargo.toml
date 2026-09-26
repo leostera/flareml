@@ -24,6 +24,8 @@ miette = { version = "7", features = ["fancy"] }
 humantime = "2"
 owo-colors = "4"
 supports-color = "3"
+getrandom = "0.3"
+ctrlc = "3"
 
 [dev-dependencies]
 tempfile = "3"

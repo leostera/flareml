@@ -2,6 +2,8 @@
 
 **Status:** design sketch with blocking semantic questions; not implemented. Implement only after [RFD0003 (choice)](RFD0003-nondeterministic-choice-and-faulty-links.md) and [RFD0004 (bounded spawn)](RFD0004-bounded-spawn.md) have been validated.
 
+**Priority:** [RFD0006 (trace explorer)](RFD0006-trace-explorer.md) is the next implementation milestone. Resume this design after the current atomic execution contract has an interactive evidence viewer.
+
 ## Motivation
 
 Actors are concurrent participants. The checker explores interleavings; physically running interpreter code in parallel is neither necessary nor sufficient to model concurrency correctly.
