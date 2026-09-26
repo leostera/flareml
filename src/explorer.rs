@@ -19,6 +19,8 @@ pub struct Session {
     stateful: BTreeMap<String, bool>,
     queues: Vec<Queues>,
     events: Vec<Json>,
+    routes: BTreeMap<(String, String), usize>,
+    spawn_order: BTreeMap<String, usize>,
 }
 fn error(message: &str) -> Error {
     Error::new(Span::default(), message)
@@ -154,6 +156,25 @@ impl Session {
             .find(|c| c.name == trace.claim)
             .ok_or_else(|| error("internal: missing validated claim"))?;
         let property = location(&source, claim.body.span);
+        let spawn_order = events
+            .iter()
+            .flat_map(|event| event["spawns"].as_array().unwrap())
+            .enumerate()
+            .map(|(index, spawn)| (spawn["actor"].as_str().unwrap().to_owned(), index))
+            .collect();
+        let mut routes = BTreeMap::new();
+        for (step, event) in events.iter().enumerate() {
+            if let Some(source) = event["actor"].as_str() {
+                for send in event["sends"].as_array().unwrap() {
+                    routes
+                        .entry((
+                            source.to_owned(),
+                            send["target"].as_str().unwrap().to_owned(),
+                        ))
+                        .or_insert(step);
+                }
+            }
+        }
         Ok(Self {
             source,
             trace,
@@ -161,6 +182,8 @@ impl Session {
             property,
             queues,
             events,
+            routes,
+            spawn_order,
             stateful: program
                 .actors
                 .iter()
@@ -249,15 +272,39 @@ impl Session {
     }
     pub fn snapshot(&self, index: usize) -> Option<Json> {
         let state = self.trace.states.get(index)?;
-        let actors: Vec<_> = state.spawned.iter().flat_map(|(name,values)| values.iter().enumerate().map(move |(slot,value)| {
+        let mut actors: Vec<_> = state.spawned.iter().flat_map(|(name,values)| values.iter().enumerate().map(move |(slot,value)| {
             let address = Value::Address(name.clone(),Box::new(Value::Identity(slot)));
             let mailbox: Vec<_> = state.mailboxes[&address].iter().enumerate().map(|(position,e)| json!({
                 "id":self.queues[index][&address][position],"payload":e.payload,"input":e.input,"observation":e.observation,"source":location(&self.source,e.source)
             })).collect();
-            json!({"id":actor_id(&address),"name":name,"slot":slot,"label":address.to_string(),"stateful":self.stateful[name],"state":if self.stateful[name] {serde_json::to_value(value).unwrap()} else {Json::Null},"mailbox":mailbox})
+            json!({"id":actor_id(&address),"name":name,"slot":slot,"spawn_order":self.spawn_order[&actor_id(&address)],"label":address.to_string(),"stateful":self.stateful[name],"state":if self.stateful[name] {serde_json::to_value(value).unwrap()} else {Json::Null},"mailbox":mailbox})
         })).collect();
+        actors.sort_by_key(|actor| actor["spawn_order"].as_u64().unwrap());
+        // Observed actor-to-actor routes in this execution prefix only. Setup
+        // and environment submissions have no actor sender; never invent one.
+        let mut routes: BTreeMap<_, usize> = self
+            .routes
+            .iter()
+            .filter(|(_, first)| **first <= index)
+            .map(|(pair, _)| (pair.clone(), 0))
+            .collect();
+        let event = &self.events[index];
+        if let Some(source) = event["actor"].as_str() {
+            for send in event["sends"].as_array().unwrap() {
+                *routes
+                    .get_mut(&(
+                        source.to_owned(),
+                        send["target"].as_str().unwrap().to_owned(),
+                    ))
+                    .expect("recorded route") += 1;
+            }
+        }
+        let flows: Vec<_> = routes
+            .into_iter()
+            .map(|((source, target), count)| json!({"source":source,"target":target,"count":count}))
+            .collect();
         Some(lossless(
-            json!({"index":index,"actors":actors,"inputs":state.inputs,"submitted":state.input_submitted,"processed":state.input_processed,"messages":state.messages,"event":self.events[index]}),
+            json!({"index":index,"actors":actors,"flows":flows,"inputs":state.inputs,"submitted":state.input_submitted,"processed":state.input_processed,"messages":state.messages,"event":self.events[index]}),
         ))
     }
 }

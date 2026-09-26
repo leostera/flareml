@@ -10,6 +10,7 @@ import {
   Background,
   Controls,
   ReactFlow,
+  Position,
   applyNodeChanges,
   type Node,
 } from "@xyflow/react";
@@ -18,6 +19,7 @@ import type { ExecutionTree, Metadata, Snapshot } from "./trace/schema";
 import { boundedStep } from "./trace/diff";
 import { changesBetween } from "./trace/presentation";
 import Inspector from "./Inspector";
+import { messageEdges, messageEdgeTypes } from "./MessageFlow";
 
 function useRequest<A>(
   task: () => Effect.Effect<A, ExplorerError>,
@@ -59,17 +61,15 @@ function Graph({
     if (chosen && !visible.includes(chosen)) visible.splice(199, 1, chosen);
     setNodes(
       visible.map((actor) => {
-        if (!positions.has(actor.id)) {
-          const i = positions.size;
-          positions.set(actor.id, {
-            x: (i % 3) * 250,
-            y: Math.floor(i / 3) * 150,
-          });
-        }
         return {
           id: actor.id,
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
           selected: actor.id === selected,
-          position: positions.get(actor.id)!,
+          position: positions.get(actor.id) ?? {
+            x: (actor.spawn_order % 3) * 250,
+            y: Math.floor(actor.spawn_order / 3) * 150,
+          },
           className: changed.has(actor.id) ? "changed-entity" : "",
           data: {
             label: (
@@ -88,10 +88,22 @@ function Graph({
       }),
     );
   }, [frame, selected, changed, positions]);
+  const edges = useMemo(
+    () => messageEdges(frame, new Set(nodes.map((node) => node.id))),
+    [frame, nodes],
+  );
   return (
     <ReactFlow
       nodes={nodes}
-      edges={[]}
+      edges={edges}
+      edgeTypes={messageEdgeTypes}
+      onEdgeClick={(_, edge) =>
+        select(
+          typeof edge.data?.recipient === "string"
+            ? edge.data.recipient
+            : edge.target,
+        )
+      }
       fitView
       fitViewOptions={{ maxZoom: 1.2 }}
       nodesConnectable={false}
@@ -416,6 +428,13 @@ export default function App({ provider }: { provider: Provider }) {
           )}
         </aside>
         <section className="system">
+          <div
+            className="flow-legend"
+            title="Only actor-to-actor sends observed in this execution prefix. Setup and external inputs are shown in transition details; lines are not a permanent network topology."
+          >
+            <span className="flow-now">Sending now</span>
+            <span className="flow-past">Observed earlier</span>
+          </div>
           <div className="system-title">
             System{" "}
             <small>
@@ -423,7 +442,10 @@ export default function App({ provider }: { provider: Provider }) {
               changed
             </small>
             {frame && frame.actors.length > 200 && (
-              <small>First 200 shown · select others in Entities</small>
+              <small>
+                First 200 shown; routes to hidden entities omitted · select
+                others in Entities
+              </small>
             )}
           </div>
           {frame ? (

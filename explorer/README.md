@@ -27,6 +27,8 @@ a violation (viewer errors exit 4).
 
 - **Traces** shows saved execution prefixes; **Entities** lists created actors at the current snapshot.
 - Scrubbing the timeline updates the selected trace node and highlights changed actors.
+- Nodes and the Entities list follow actual spawn order, including handler-created actors. Manual node positioning remains available.
+- Each communicating actor pair has one connection: current sends animate toward the recipient; replies reverse that same line. Previously observed connections are dotted. Rewinding removes routes that have not happened yet. Multiple sends are counted and self-sends have a loop. These are observed routes, not permanent topology or inferred request/reply correlation. Setup and external submissions have no actor sender and remain in transition details.
 - The right pane always shows **What changed** (named state fields and mailbox changes), above the selected entity's current state and messages.
 - Values use model names and constructors, not JSON serialization wrappers. Raw evidence remains available in collapsed details.
 - Clicking a property endpoint shows its source formula and validated failure context. Invariant failures refer to the final snapshot; temporal failures refer to the execution/loop, not necessarily a single state. This is not automated causal diagnosis.

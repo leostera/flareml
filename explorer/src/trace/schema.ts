@@ -107,6 +107,7 @@ export const Actor = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   slot: Nat,
+  spawn_order: Nat,
   label: Schema.String,
   stateful: Schema.Boolean,
   state: Schema.NullOr(Value),
@@ -114,6 +115,9 @@ export const Actor = Schema.Struct({
 });
 export type Actor = typeof Actor.Type;
 export const Snapshot = Schema.Struct({
+  flows: Schema.Array(
+    Schema.Struct({ source: Schema.String, target: Schema.String, count: Nat }),
+  ),
   index: Nat,
   actors: Schema.Array(Actor),
   event: Event,

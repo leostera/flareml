@@ -22,7 +22,7 @@
     "spawn_bounds": {
       "A": 1
     },
-    "tool_version": "0.4.0",
+    "tool_version": "0.5.0",
     "trace_version": 8
   },
   "snapshots": [
@@ -48,6 +48,7 @@
           ],
           "name": "A",
           "slot": 0,
+          "spawn_order": 0,
           "state": {
             "Int": "9223372036854775807"
           },
@@ -92,6 +93,7 @@
           }
         ]
       },
+      "flows": [],
       "index": 0,
       "inputs": [],
       "messages": {},
@@ -106,6 +108,7 @@
           "mailbox": [],
           "name": "A",
           "slot": 0,
+          "spawn_order": 0,
           "state": {
             "Int": "0"
           },
@@ -139,6 +142,7 @@
         },
         "spawns": []
       },
+      "flows": [],
       "index": 1,
       "inputs": [],
       "messages": {},

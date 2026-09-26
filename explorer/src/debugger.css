@@ -1,3 +1,33 @@
+.flow-legend {
+  position: absolute;
+  bottom: 18px;
+  left: 24px;
+  z-index: 3;
+  display: flex;
+  gap: 18px;
+  color: #8795a2;
+  font-size: 10px;
+  pointer-events: auto;
+}
+.flow-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  margin-right: 7px;
+  vertical-align: middle;
+  border-top: 2px solid #527c9f;
+}
+.flow-legend .flow-past::before {
+  border-top: 1px dashed #b4c0cc;
+}
+.react-flow__edge.animated.reverse-flow path {
+  animation-direction: reverse;
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge.animated path {
+    animation: none !important;
+  }
+}
 .app main {
   grid-template-columns: 245px minmax(280px, 1fr) 385px;
 }

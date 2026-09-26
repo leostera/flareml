@@ -200,6 +200,95 @@ test("real creation and choice events are inspectable without unborn nodes", asy
   );
   await expect(page.locator(".changed-entity")).toHaveCount(3);
 });
+test("message-flow arrows activate on sends, go dotted when idle, and rewind without future routes", async ({
+  page,
+}) => {
+  const source =
+    'actor Gateway { handle_message(target: Actor<Processor>): unit { send(target, ()); send(target, ()); } } actor Processor { init(): Int { 0 } handle_message(s: Int, m: unit): Int { s + 1 } } property "done" { reachable (exists (a in instances(Processor)) { a.state == Some(2) }) } check C { domain Int = 0..2 spawn_bound Gateway = 1 spawn_bound Processor = 1 mailbox_bound = 2 main { let p = spawn(Processor); let g = spawn(Gateway); send(g, p); } }';
+  await page.goto(await start("message-flow", source));
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+  await expect(page.locator(".message-flow")).toHaveCount(0);
+  await page.getByRole("button", { name: "Next step", exact: true }).click();
+  await expect(page.locator(".active-flow")).toHaveCount(1);
+  await expect(page.locator(".active-flow")).toContainText("2 messages");
+  await expect(page.locator(".active-flow")).toHaveAttribute(
+    "aria-label",
+    /actor:Gateway:0 to actor:Processor:0/,
+  );
+  await page.locator(".active-flow .react-flow__edge-textbg").click();
+  await expect(page.locator(".entity-panel")).toContainText("Processor #0");
+  await page.screenshot({ path: "test-results/message-flow.png" });
+  await page.getByRole("button", { name: "Next step", exact: true }).click();
+  await expect(page.locator(".active-flow")).toHaveCount(0);
+  await expect(page.locator(".past-flow")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Previous step", exact: true })
+    .click();
+  await expect(page.locator(".active-flow")).toHaveCount(1);
+  await page.getByRole("button", { name: "First step", exact: true }).click();
+  await expect(page.locator(".step-number")).toHaveText("0 / 3");
+  await expect(page.locator(".message-flow")).toHaveCount(0);
+});
+test("spawn order places Processor before Gateway, and Receipt reverses the existing connection", async ({
+  page,
+}) => {
+  const source =
+    'type Request = Start(Actor<Processor>, Actor<Gateway>) | Receipt actor Gateway { init(): Bool { false } handle_message(s: Bool, m: Request): Bool { match m { | Start(p, reply) -> { send(p, reply); false } | Receipt -> true } } } actor Processor { handle_message(reply: Actor<Gateway>): unit { send(reply, Receipt); } } property "done" { reachable (exists (g in instances(Gateway)) { g.state == Some(true) }) } check C { spawn_bound Gateway = 1 spawn_bound Processor = 1 mailbox_bound = 1 main { let p = spawn(Processor); let g = spawn(Gateway); send(g, Start(p, g)); } }';
+  await page.goto(await start("receipt-flow", source));
+  await expect(page.locator(".react-flow__node")).toHaveCount(2);
+  const p = page
+      .locator(".react-flow__node")
+      .filter({ hasText: "Processor #0" }),
+    g = page.locator(".react-flow__node").filter({ hasText: "Gateway #0" });
+  expect((await p.boundingBox())!.x).toBeLessThan((await g.boundingBox())!.x);
+  await page.getByRole("tab", { name: "Entities", exact: true }).click();
+  await expect(page.locator(".entity-list button").first()).toContainText(
+    "Processor #0",
+  );
+  await page.getByRole("button", { name: "Next step", exact: true }).click();
+  await expect(
+    page.locator(".active-flow .react-flow__edge-path"),
+  ).toHaveAttribute("marker-start", /url/);
+  const path = await page
+    .locator(".active-flow .react-flow__edge-path")
+    .getAttribute("d");
+  const id = await page.locator(".active-flow").getAttribute("data-id");
+  await page.getByRole("button", { name: "Next step", exact: true }).click();
+  await expect(page.locator(".message-flow")).toHaveCount(1);
+  await expect(page.locator(".active-flow")).toContainText("Receipt");
+  await expect(page.locator(".active-flow")).toHaveAttribute("data-id", id!);
+  await expect(
+    page.locator(".active-flow .react-flow__edge-path"),
+  ).toHaveAttribute("d", path!);
+  await expect(
+    page.locator(".active-flow .react-flow__edge-path"),
+  ).toHaveAttribute("marker-end", /url/);
+  await expect(
+    page.locator(".active-flow .react-flow__edge-path"),
+  ).not.toHaveAttribute("marker-start", /url/);
+  await page.locator(".active-flow .react-flow__edge-textbg").click();
+  await expect(page.locator(".entity-panel h2")).toHaveText("Gateway #0");
+  await page.getByRole("button", { name: "Next step", exact: true }).click();
+  await expect(page.locator(".past-flow")).toHaveCount(1);
+  await expect(page.locator(".active-flow")).toHaveCount(0);
+});
+test("self-send has a visible directed loop instead of a zero-length edge", async ({
+  page,
+}) => {
+  const source =
+    'actor A { init(): Bool { false } handle_message(s: Bool, me: Actor<A>): Bool { send(me, me); true } } property "done" { reachable (exists (a in instances(A)) { a.state == Some(true) }) } check C { spawn_bound A = 1 mailbox_bound = 1 main { let a = spawn(A); send(a, a); } }';
+  await page.goto(await start("self-flow", source));
+  await page.getByRole("button", { name: "Last step" }).click();
+  await expect(page.locator(".active-flow")).toHaveCount(1);
+  const path = page.locator(".active-flow .react-flow__edge-path");
+  await expect(path).toHaveAttribute("marker-end", /url/);
+  expect(
+    await path.evaluate(
+      (element) => (element as SVGPathElement).getBBox().width,
+    ),
+  ).toBeGreaterThan(100);
+  await page.screenshot({ path: "test-results/self-flow.png" });
+});
 test("payment failure explains the invariant and renders named fields with an always-visible diff", async ({
   page,
 }) => {

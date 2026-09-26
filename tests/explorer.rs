@@ -103,6 +103,11 @@ fn identical_payloads_and_self_sends_keep_trace_local_identity_without_history()
         a["actors"][0]["mailbox"][0]["payload"],
         a["actors"][0]["mailbox"][1]["payload"]
     );
+    assert_eq!(a["flows"], json!([]));
+    assert_eq!(
+        b["flows"],
+        json!([{"source":"actor:A:0","target":"actor:A:0","count":1}])
+    );
     assert_eq!(b["event"]["consumed"]["id"], "envelope:0:0");
     assert_eq!(b["actors"][0]["mailbox"][0]["id"], "envelope:0:1");
     assert_eq!(b["actors"][0]["mailbox"][1]["id"], "envelope:1:0");
@@ -120,6 +125,15 @@ fn source_order_across_targets_is_captured_not_guessed_from_sorted_queues() {
         .map(|s| s["target"].as_str().unwrap())
         .collect();
     assert_eq!(targets, ["actor:Sink:1", "actor:Sink:0", "actor:Sink:1"]);
+    assert_eq!(session.snapshot(0).unwrap()["flows"], json!([]));
+    assert_eq!(session.snapshot(1).unwrap()["flows"], json!([]));
+    assert_eq!(
+        frame["flows"],
+        json!([
+            {"source":"actor:Sender:0","target":"actor:Sink:0","count":1},
+            {"source":"actor:Sender:0","target":"actor:Sink:1","count":2}
+        ])
+    );
     assert_eq!(
         frame["actors"]
             .as_array()
@@ -129,6 +143,23 @@ fn source_order_across_targets_is_captured_not_guessed_from_sorted_queues() {
             .count(),
         3
     );
+}
+#[test]
+fn historical_routes_go_idle_and_rewinding_does_not_leak_future_sends() {
+    let source = "actor Sender { handle_message(target: Actor<Sink>): unit { send(target, ()); } } actor Sink { init(): Bool { false } handle_message(s: Bool, m: unit): Bool { true } } property \"done\" { reachable (exists (a in instances(Sink)) { a.state == Some(true) }) } check C { spawn_bound Sender = 1 spawn_bound Sink = 1 mailbox_bound = 1 main { let sink = spawn(Sink); let sender = spawn(Sender); send(sender, sink); } }";
+    let (p, t) = witness(source);
+    let session = Session::validated(source.into(), t, &p).unwrap();
+    let initial = session.snapshot(0).unwrap();
+    assert_eq!(initial["actors"][0]["name"], "Sink");
+    assert_eq!(initial["actors"][0]["spawn_order"], 0);
+    assert_eq!(initial["actors"][1]["name"], "Sender");
+    assert_eq!(initial["actors"][1]["spawn_order"], 1);
+    assert_eq!(
+        session.snapshot(2).unwrap()["flows"],
+        json!([{"source":"actor:Sender:0","target":"actor:Sink:0","count":0}])
+    );
+    assert_eq!(session.snapshot(1).unwrap()["flows"][0]["count"], 1);
+    assert_eq!(session.snapshot(0).unwrap()["flows"], json!([]));
 }
 #[test]
 fn zero_step_witness_and_stutter_lasso_have_real_snapshots() {
