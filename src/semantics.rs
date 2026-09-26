@@ -113,6 +113,14 @@ pub struct State {
     pub keyed_actors: BTreeMap<String, BTreeMap<Value, Value>>,
     pub tables: BTreeMap<String, Vec<Value>>,
     pub frames: Vec<Frame>,
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "mailbox_serde"
+    )]
+    pub mailboxes: BTreeMap<Value, Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_submitted: Vec<bool>,
 }
 // JSON objects require string keys. Actor identities are typed Values, so encode
 // per-actor state as ordered (identity, state) pairs instead of stringifying keys.
@@ -148,6 +156,29 @@ mod keyed_actor_serde {
             .collect()
     }
 }
+mod mailbox_serde {
+    use super::Value;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S: Serializer>(
+        values: &BTreeMap<Value, Vec<Value>>,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        values.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<BTreeMap<Value, Vec<Value>>, D::Error> {
+        let entries = Vec::<(Value, Vec<Value>)>::deserialize(deserializer)?;
+        let count = entries.len();
+        let result: BTreeMap<_, _> = entries.into_iter().collect();
+        if count != result.len() {
+            return Err(D::Error::custom("duplicate mailbox address"));
+        }
+        Ok(result)
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Action {
     pub id: String,
@@ -163,6 +194,9 @@ pub struct Step {
 
 impl Program {
     pub fn initial(&self) -> Result<State> {
+        if self.check.semantics == "actors-v2" {
+            return self.initial_messages();
+        }
         let mut s = State {
             tables: self.tables.keys().map(|n| (n.clone(), vec![])).collect(),
             ..State::default()
@@ -433,6 +467,11 @@ impl Program {
                 if let Some(v) = env.get(n) {
                     return Ok(v.clone());
                 }
+                if self.check.semantics == "actors-v2"
+                    && self.actors.get(n).is_some_and(|a| a.key.is_none())
+                {
+                    return Ok(Value::Address(n.clone(), Box::new(Value::Unit)));
+                }
                 if n == "None" {
                     return Ok(Value::none());
                 }
@@ -487,11 +526,14 @@ impl Program {
                     && self.actors.get(name).is_some_and(|a| a.key.is_some())
                 {
                     let key = ev(&args[0])?;
-                    if !s
-                        .keyed_actors
-                        .get(name)
-                        .is_some_and(|values| values.contains_key(&key))
-                    {
+                    if !(if self.check.semantics == "actors-v2" {
+                        s.mailboxes
+                            .contains_key(&Value::Address(name.clone(), Box::new(key.clone())))
+                    } else {
+                        s.keyed_actors
+                            .get(name)
+                            .is_some_and(|values| values.contains_key(&key))
+                    }) {
                         return Err(Error::new(
                             e.span,
                             "LIMIT: actor key outside finite identity domain",
@@ -627,7 +669,12 @@ impl Program {
             }
         }
     }
-    fn eval_function_body(&self, body: &[Stmt], env: &mut Env, s: &State) -> Result<Value> {
+    pub(crate) fn eval_function_body(
+        &self,
+        body: &[Stmt],
+        env: &mut Env,
+        s: &State,
+    ) -> Result<Value> {
         let mut result = Value::Unit;
         for statement in body {
             result = match &statement.kind {
@@ -733,6 +780,9 @@ impl Program {
         }
     }
     pub fn successors(&self, s: &State) -> Result<Vec<Step>> {
+        if self.check.semantics == "actors-v2" {
+            return self.message_successors(s);
+        }
         let mut steps = vec![Step {
             action: Action {
                 id: "stutter".into(),
@@ -1075,7 +1125,7 @@ impl Program {
         ))
     }
 }
-fn bind_pattern(p: &Pattern, v: &Value, env: &mut Env) -> bool {
+pub(crate) fn bind_pattern(p: &Pattern, v: &Value, env: &mut Env) -> bool {
     match p {
         Pattern::Wild => true,
         Pattern::Bind(n) => {

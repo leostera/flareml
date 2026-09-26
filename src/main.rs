@@ -17,7 +17,7 @@ use std::{
 #[command(
     name = "fml",
     version,
-    about = "Check finite Cloudflare system models with a native checker"
+    about = "Check finite system models with a native checker"
 )]
 struct Cli {
     #[arg(long, global = true, value_enum, default_value = "auto")]

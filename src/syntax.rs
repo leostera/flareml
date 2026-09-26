@@ -174,6 +174,9 @@ pub struct Actor {
     /// Owned state is retained between invocations; this does not imply durability.
     pub state: Option<(Type, Expr)>,
     pub handlers: BTreeMap<String, String>,
+    /// Only the asynchronous profile uses inline handlers and a pure initializer.
+    pub v2: bool,
+    pub initializer: Option<String>,
     pub span: Span,
 }
 #[derive(Clone, Debug)]
@@ -203,6 +206,7 @@ pub struct Input {
     pub handler: String,
     pub key: Option<Expr>,
     pub value: Expr,
+    pub via_send: bool,
     pub span: Span,
 }
 #[derive(Clone, Debug)]
@@ -213,6 +217,7 @@ pub struct Check {
     pub inputs: Vec<Input>,
     pub domains: BTreeMap<String, Vec<Expr>>,
     pub fair: bool,
+    pub mailbox_bound: Option<usize>,
     pub span: Span,
 }
 #[derive(Clone, Debug, Default)]
@@ -750,6 +755,88 @@ impl Parser {
                     key,
                     state,
                     handlers,
+                    v2: false,
+                    initializer: None,
+                    span,
+                });
+            } else if self.eat("actor") {
+                let name = self.name()?;
+                let key = if self.eat("(") {
+                    let param = self.name()?;
+                    self.expect(":")?;
+                    let ty = self.ty()?;
+                    self.expect(")")?;
+                    Some((param, ty))
+                } else {
+                    None
+                };
+                self.expect("{")?;
+                let mut initializer = None;
+                let mut handler = None;
+                while !self.eat("}") {
+                    let method = self.name()?;
+                    if method != "init" && method != "handle_message" {
+                        return self.err("actors-v2 supports only init and handle_message");
+                    }
+                    self.expect("(")?;
+                    let mut params = vec![];
+                    while !self.eat(")") {
+                        let param = self.name()?;
+                        self.expect(":")?;
+                        params.push((param, self.ty()?));
+                        if !self.eat(",") {
+                            self.expect(")")?;
+                            break;
+                        }
+                    }
+                    self.expect(":")?;
+                    let output = self.ty()?;
+                    let body = self.block()?;
+                    let function = format!("$actor.{name}.{method}");
+                    if method == "init" {
+                        if initializer.replace(function.clone()).is_some() {
+                            return self.err("duplicate actor initializer");
+                        }
+                    } else if handler.replace(function.clone()).is_some() {
+                        return self.err("duplicate actor message handler");
+                    }
+                    m.functions.push(Function {
+                        name: function,
+                        params,
+                        output,
+                        body,
+                        span,
+                    });
+                    self.eat(";");
+                }
+                let handler =
+                    handler.ok_or_else(|| Error::new(span, "actor requires handle_message"))?;
+                // The legacy Actor AST carries an initial expression alongside its
+                // state type. In v2 the real initializer is the inline function;
+                // the unit expression is never evaluated by the v2 interpreter.
+                let state = initializer.as_ref().map(|f| {
+                    let output = m
+                        .functions
+                        .iter()
+                        .find(|x| &x.name == f)
+                        .expect("parsed init")
+                        .output
+                        .clone();
+                    (
+                        output,
+                        Expr {
+                            kind: ExprKind::Unit,
+                            span,
+                        },
+                    )
+                });
+                m.actors.push(Actor {
+                    name,
+                    key,
+                    state,
+                    handlers: BTreeMap::from([("handle_message".into(), handler)]),
+                    v2: true,
+                    initializer,
                     span,
                 });
             } else if self.eat("worker") {
@@ -789,6 +876,8 @@ impl Parser {
                     key: None,
                     state: None,
                     handlers: bindings,
+                    v2: false,
+                    initializer: None,
                     span,
                 });
             } else if ["invariant", "property", "cover"]
@@ -821,6 +910,7 @@ impl Parser {
                     inputs: vec![],
                     domains: BTreeMap::new(),
                     fair: false,
+                    mailbox_bound: None,
                     span,
                 };
                 let mut sections = std::collections::BTreeSet::new();
@@ -885,24 +975,69 @@ impl Parser {
                                 let span = self.token().span;
                                 let request = self.expr(0)?;
                                 let ExprKind::Call(target, mut args) = request.kind else {
-                                    return self.err("input requires a handler call");
+                                    return self.err(
+                                        "input requires a handler call or send(address, message)",
+                                    );
                                 };
-                                if args.len() != 1 {
-                                    return self.err("input requires exactly one message");
-                                }
-                                let (handler, key) = actor_target(&target).ok_or_else(|| {
-                                    Error::new(
-                                        span,
-                                        "input requires Actor.method or Actor.at(key).method",
-                                    )
-                                })?;
+                                let via_send = target.path().as_deref() == Some("send");
+                                let (handler, key, value) = if via_send {
+                                    if args.len() != 2 {
+                                        return self
+                                            .err("send input requires an address and one message");
+                                    }
+                                    let address = args.remove(0);
+                                    let (name, key) = match address.kind {
+                                        ExprKind::Name(name) => (name, None),
+                                        ExprKind::Call(at, mut keys) if keys.len() == 1 => {
+                                            let ExprKind::Field(actor, method) = at.kind else {
+                                                return self
+                                                    .err("send input requires Actor.at(key)");
+                                            };
+                                            let ExprKind::Name(name) = actor.kind else {
+                                                return self
+                                                    .err("send input requires Actor.at(key)");
+                                            };
+                                            if method != "at" {
+                                                return self
+                                                    .err("send input requires Actor.at(key)");
+                                            }
+                                            (name, Some(keys.remove(0)))
+                                        }
+                                        _ => {
+                                            return self
+                                                .err("send input requires a static actor address");
+                                        }
+                                    };
+                                    (format!("{name}.handle_message"), key, args.remove(0))
+                                } else {
+                                    if args.len() != 1 {
+                                        return self.err("input requires exactly one message");
+                                    }
+                                    let (handler, key) = actor_target(&target).ok_or_else(|| Error::new(span, "input requires Actor.method or Actor.at(key).method"))?;
+                                    (handler, key, args.remove(0))
+                                };
                                 c.inputs.push(Input {
                                     handler,
                                     key,
-                                    value: args.remove(0),
+                                    value,
+                                    via_send,
                                     span,
                                 });
                             }
+                        }
+                        "mailbox_bound" => {
+                            self.expect("=")?;
+                            let token = self.take();
+                            let n = token.text.parse::<usize>().map_err(|_| {
+                                Error::new(token.span, "mailbox_bound requires a positive integer")
+                            })?;
+                            if n == 0 || n > 4096 {
+                                return Err(Error::new(
+                                    token.span,
+                                    "mailbox_bound must be 1..4096",
+                                ));
+                            }
+                            c.mailbox_bound = Some(n);
                         }
                         "fairness" => {
                             self.expect("{")?;

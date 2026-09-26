@@ -2,11 +2,21 @@
 
 Branch: `spike/actor-generalization`, based on the initial `main` checkpoint `327bd44`. This is a **spike**, not a finished replacement for [RFD0001](../rfds/RFD0001-initial-language-and-model-checker.md). No deployable runtime is produced.
 
-## Design direction after this checkpoint
+## New asynchronous checkpoint (experimental `actors-v2`)
 
-[RFD0002](../rfds/RFD0002-functions-and-actors.md) now proposes a **different** core: one `actor` declaration, typed `init(args) -> state`, state-in/state-out `handle_message`, and one-way typed `send` with explicit reply addresses and correlation IDs. The proposed mailbox, staged-send and atomic state/outbox commit rules are **not implemented** in this branch. Do not interpret the working `actors-v1` synchronous `call` as this protocol; it remains an experimental, versioned regression profile. A new profile and replay format are required if checker state or behavior changes.
+[RFD0002](../rfds/RFD0002-functions-and-actors.md) proposes one `actor` declaration, typed `init(id) -> state`, state-in/state-out `handle_message`, and one-way typed `send` with explicit reply addresses and correlation IDs. A **fault-free, finite slice is now implemented** as a distinct `actors-v2` profile. See [`examples/actor-messages.fml`](../../examples/actor-messages.fml), `src/messaging.rs`, and `tests/messaging.rs`. Per-address FIFO mailboxes, optional one-shot external submission, atomic handler state/outbox commit, source-ordered staged sends (including from helpers), state predicates, fairness for enabled processing, replay, and explicit per-address `mailbox_bound` are implemented. Exhausting the bound is `INCONCLUSIVE`; a v2 trace is format 4 (v0/v1 traces remain 3).
 
-## RFD0002 implementation checkpoint (experimental `actors-v1`)
+**Not yet RFD completion:** no `submitted`/`processed` temporal inspector or dynamic message quantification; no failure/retry/restart, DO/Worker/Queue adapter, general check-supplied `init(args)` configuration, suspension inside callbacks, or independent scheduling/capability oracle. The generic atomic mailbox is not a Cloudflare contract. Do not interpret the older `actors-v1` synchronous `call` as v2 `send`; it remains an experimental regression profile. The historical notes below refer to earlier checkpoints, not today's profile.
+
+Pickup commands for v2:
+
+```sh
+cargo run -- check examples/actor-messages.fml --trace-out /tmp/actor-messages.trace.json
+cargo run -- replay examples/actor-messages.fml /tmp/actor-messages.trace.json
+cargo test --locked --test messaging
+```
+
+## Earlier RFD0002 implementation checkpoint (experimental `actors-v1`)
 
 The sections below document the **original `actors-v0` checkpoint**; their "no calls/keyed instances" warnings are historical for that profile. The branch now has a second, opt-in `actors-v1` profile with typed `call(Actor.method, message)`, suspended callers, independently scheduled callee acceptance and reply, and finite keyed stateful actors addressed with `Actor.at(key)`. `Address<ActorName>` values can now be stored, sent, and used as `call(address.method, message)` without exposing the `Actor<State>` owner capability. Keyed input slots use `once Actor.at(key).method(message)`, and read-only specifications use `Actor.at(key).state`. Initial state is eagerly materialized for each finite key. `requests(Actor.method)` still observes only declared external slots. There are runnable passing and failing examples in `examples/actor-keyed.fml`, `examples/actor-address.fml`, `examples/actor-call.fml`, and `examples/actor-interleaving.fml`; the same-key interleaving example witnesses a lost update across an actor call. Replay artifacts are now version 3. `actors-v0` and `cf-core-v0` still run, and actor calls/keyed actors are gated to `actors-v1`.
 

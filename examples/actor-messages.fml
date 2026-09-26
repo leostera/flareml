@@ -1,0 +1,42 @@
+// Experimental actors-v2: messages and state transitions are finite, not durable.
+type CounterId = Main
+type ClientId = User
+type RequestId = First
+type CounterMessage = Inc(Address<Client>, RequestId)
+type ClientMessage = Counted(RequestId, Int)
+type ClientState = Waiting | Observed
+
+actor Counter(id: CounterId) {
+  init(id: CounterId): Int { 0 }
+  handle_message(state: Int, message: CounterMessage): Int {
+    match message {
+      | Inc(reply_to, request_id) -> {
+          let next = state + 1
+          send(reply_to, Counted(request_id, next))
+          next
+        }
+    }
+  }
+}
+
+actor Client(id: ClientId) {
+  init(id: ClientId): ClientState { Waiting }
+  handle_message(state: ClientState, message: ClientMessage): ClientState {
+    match message {
+      | Counted(_, _) -> Observed
+    }
+  }
+}
+
+invariant "reply cannot be processed before the counter commits" {
+  Client.at(User).state == Observed implies Counter.at(Main).state == 1
+}
+cover "client receives reply" { Client.at(User).state == Observed }
+
+check OneIncrement {
+  semantics = "actors-v2"
+  domain Int = 0..1
+  mailbox_bound = 2
+  inputs { once send(Counter.at(Main), Inc(Client.at(User), First)) }
+  fairness { weak runtime.progress }
+}

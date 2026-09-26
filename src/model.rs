@@ -117,10 +117,12 @@ impl Program {
             ));
         }
         .clone();
-        if !["actors-v0", "actors-v1", "cf-core-v0"].contains(&check.semantics.as_str()) {
+        if !["actors-v0", "actors-v1", "actors-v2", "cf-core-v0"]
+            .contains(&check.semantics.as_str())
+        {
             return Err(Error::new(
                 check.span,
-                "unsupported semantics; actor models use \"actors-v0\" or \"actors-v1\"",
+                "unsupported semantics; actor models use actors-v0, actors-v1 or actors-v2",
             ));
         }
         if check.semantics == "cf-core-v0"
@@ -132,6 +134,28 @@ impl Program {
             return Err(Error::new(
                 check.span,
                 "general functions/actors require the \"actors-v0\" profile",
+            ));
+        }
+        if model
+            .actors
+            .iter()
+            .any(|a| a.v2 != (check.semantics == "actors-v2"))
+        {
+            return Err(Error::new(
+                check.span,
+                "actors-v2 requires unified actor declarations; older profiles require legacy actor declarations",
+            ));
+        }
+        if (check.semantics == "actors-v2") != check.mailbox_bound.is_some() {
+            return Err(Error::new(
+                check.span,
+                "actors-v2 requires mailbox_bound; older profiles cannot declare one",
+            ));
+        }
+        if check.semantics == "actors-v2" && !model.tables.is_empty() {
+            return Err(Error::new(
+                check.span,
+                "actors-v2 does not support D1 tables",
             ));
         }
         let mut p = Self {
@@ -291,11 +315,20 @@ impl Program {
             }
         }
         for i in &p.check.inputs {
+            if i.via_send != (p.check.semantics == "actors-v2") {
+                return Err(Error::new(
+                    i.span,
+                    "actors-v2 inputs require once send(address, message); older profiles require handler inputs",
+                ));
+            }
             let actor = i.handler.split('.').next().and_then(|n| p.actors.get(n));
             match (actor.and_then(|a| a.key.as_ref()), i.key.as_ref()) {
                 (Some((_, ty)), Some(key)) => {
-                    if p.check.semantics != "actors-v1" {
-                        return Err(Error::new(i.span, "keyed actors require actors-v1"));
+                    if p.check.semantics != "actors-v1" && p.check.semantics != "actors-v2" {
+                        return Err(Error::new(
+                            i.span,
+                            "keyed actors require actors-v1 or actors-v2",
+                        ));
                     }
                     let actual = p.type_expr(key, &env, None, false, false)?;
                     p.require(&p.resolve(ty, key.span)?, &actual, key.span)?;
@@ -322,10 +355,19 @@ impl Program {
             p.require(&p.resolve(&h.input, h.span)?, &actual, i.span)?;
         }
         for actor in p.actors.values() {
-            if actor.key.is_some() && p.check.semantics != "actors-v1" {
-                return Err(Error::new(actor.span, "keyed actors require actors-v1"));
+            if actor.key.is_some()
+                && p.check.semantics != "actors-v1"
+                && p.check.semantics != "actors-v2"
+            {
+                return Err(Error::new(
+                    actor.span,
+                    "keyed actors require actors-v1 or actors-v2",
+                ));
             }
             if let Some((ty, initial)) = &actor.state {
+                if actor.v2 {
+                    continue;
+                }
                 let mut init_env = env.clone();
                 if let Some((name, key_ty)) = &actor.key {
                     init_env.insert(name.clone(), p.resolve(key_ty, actor.span)?);
@@ -335,6 +377,12 @@ impl Program {
             }
         }
         for f in p.functions.values() {
+            if p.check.semantics == "actors-v2" && f.params.iter().any(|(_, t)| t.name == "Actor") {
+                return Err(Error::new(
+                    f.span,
+                    "actors-v2 has no Actor<State> owner capability",
+                ));
+            }
             let output = p.resolve(&f.output, f.span)?;
             let mut env = BTreeMap::new();
             for (name, ty) in &f.params {
@@ -389,11 +437,11 @@ impl Program {
                     .model
                     .actors
                     .iter()
-                    .any(|a| a.name == actor.name && a.key.is_some())
+                    .any(|a| a.name == actor.name && (a.key.is_some() || a.v2))
             {
                 return Err(Error::new(
                     span,
-                    "Address<ActorName> requires a keyed stateful actor",
+                    "Address<ActorName> requires a keyed actor (or an actors-v2 singleton)",
                 ));
             }
             return Ok(Ty::Address(actor.name.clone()));
@@ -632,7 +680,11 @@ impl Program {
             if !property {
                 return Err(Error::new(
                     e.span,
-                    "actor state inspection is property-only; handlers use their own Actor<State> capability",
+                    if self.check.semantics == "actors-v2" {
+                        "actor state inspection is property-only; handlers use their state parameter"
+                    } else {
+                        "actor state inspection is property-only; handlers use their own Actor<State> capability"
+                    },
                 ));
             }
             let (ty, _) = actor
@@ -650,7 +702,7 @@ impl Program {
             let (_, key_ty) = decl
                 .key
                 .as_ref()
-                .ok_or_else(|| Error::new(e.span, "only keyed actors have addresses"))?;
+                .ok_or_else(|| Error::new(e.span, "only keyed actors have .at(key) addresses"))?;
             if args.len() != 1 {
                 return Err(Error::new(e.span, "Actor.at requires exactly one key"));
             }
@@ -676,6 +728,11 @@ impl Program {
             ExprKind::String(_) => Ok(Ty::named("String")),
             ExprKind::Unit => Ok(Ty::named("unit")),
             ExprKind::Name(n) => {
+                if self.check.semantics == "actors-v2"
+                    && self.actors.get(n).is_some_and(|a| a.key.is_none())
+                {
+                    return Ok(Ty::Address(n.clone()));
+                }
                 if let Some(t) = env.get(n) {
                     return Ok(t.clone());
                 }
@@ -771,6 +828,28 @@ impl Program {
                     }
                     return self.resolve(&function.output, e.span);
                 }
+                if path == "send" {
+                    if self.check.semantics != "actors-v2" || property || !effect || args.len() != 2
+                    {
+                        return Err(Error::new(
+                            e.span,
+                            "send(address, message) is a direct actors-v2 handler effect",
+                        ));
+                    }
+                    let Ty::Address(actor) = pure(&args[0])? else {
+                        return Err(Error::new(
+                            args[0].span,
+                            "send requires a typed actor address",
+                        ));
+                    };
+                    let h = &self.handlers[&format!("{actor}.handle_message")];
+                    self.require(
+                        &self.resolve(&h.input, e.span)?,
+                        &pure(&args[1])?,
+                        args[1].span,
+                    )?;
+                    return Ok(Ty::named("unit"));
+                }
                 if path == "call" {
                     if self.check.semantics != "actors-v1" {
                         return Err(Error::new(
@@ -837,6 +916,12 @@ impl Program {
                     return self.resolve(&handler.output, e.span);
                 }
                 if path == "requests" {
+                    if self.check.semantics == "actors-v2" {
+                        return Err(Error::new(
+                            e.span,
+                            "requests(Actor.method) is not an actors-v2 message inspector",
+                        ));
+                    }
                     if !property || args.len() != 1 {
                         return Err(Error::new(
                             e.span,

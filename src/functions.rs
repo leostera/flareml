@@ -15,7 +15,10 @@ impl Program {
                 .tables
                 .keys()
                 .any(|p| p.split('.').next() == Some(name))
-            || ["call", "requests", "respond", "Some", "None", "Ok", "Err"].contains(&name)
+            || [
+                "call", "send", "requests", "respond", "Some", "None", "Ok", "Err",
+            ]
+            .contains(&name)
     }
 
     pub(crate) fn bind_actors_and_functions(&mut self) -> Result<()> {
@@ -28,7 +31,8 @@ impl Program {
         );
         names.extend(
             [
-                "call", "requests", "respond", "Some", "None", "Ok", "Err", "Actor", "Address",
+                "call", "send", "requests", "respond", "Some", "None", "Ok", "Err", "Actor",
+                "Address",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -95,10 +99,22 @@ impl Program {
                     Error::new(actor.span, format!("unknown handler function `{function}`"))
                 })?;
                 let count = if state.is_some() { 2 } else { 1 };
+                if actor.v2
+                    && (method != "handle_message"
+                        || self.resolve(&f.output, f.span)?
+                            != state.clone().unwrap_or(Ty::Named("unit".into())))
+                {
+                    return Err(Error::new(
+                        f.span,
+                        "handle_message must return the actor's state type (or unit for a stateless actor)",
+                    ));
+                }
                 if f.params.len() != count {
                     return Err(Error::new(
                         actor.span,
-                        if state.is_some() {
+                        if state.is_some() && actor.v2 {
+                            "stateful handle_message takes (state: State, message: Message)"
+                        } else if state.is_some() {
                             "stateful handler functions take (owner: Actor<State>, message: Input)"
                         } else {
                             "stateless handler functions take exactly one message parameter"
@@ -106,11 +122,15 @@ impl Program {
                     ));
                 }
                 if let Some(state) = &state {
-                    let expected = Ty::Actor(Box::new(state.clone()));
+                    let expected = if actor.v2 {
+                        state.clone()
+                    } else {
+                        Ty::Actor(Box::new(state.clone()))
+                    };
                     if self.resolve(&f.params[0].1, f.span)? != expected {
                         return Err(Error::new(
                             f.span,
-                            "handler Actor<State> capability does not match the actor's state type",
+                            "handler state parameter does not match the actor's state type",
                         ));
                     }
                 }
@@ -131,6 +151,21 @@ impl Program {
             }
         }
         self.infer_effects()?;
+        for actor in self.actors.values().filter(|a| a.v2) {
+            if let Some(init) = &actor.initializer {
+                let f = &self.functions[init];
+                if f.params.len() != usize::from(actor.key.is_some())
+                    || actor.key.as_ref().is_some_and(|(_, t)| f.params[0].1 != *t)
+                    || self.effects[init].suspends_or_writes()
+                    || self.effects[init].inspects
+                {
+                    return Err(Error::new(
+                        actor.span,
+                        "init must be pure and take only the actor identity (or no arguments for a singleton)",
+                    ));
+                }
+            }
+        }
         for h in self.handlers.values() {
             if self.effects[&h.function].inspects {
                 return Err(Error::new(
@@ -212,7 +247,7 @@ impl Program {
                     if path == "requests" {
                         fx.inspects = true;
                     }
-                    if path == "call" {
+                    if path == "call" || path == "send" {
                         fx.io = true;
                     }
                     if let ExprKind::Field(receiver, method) = &target.kind {

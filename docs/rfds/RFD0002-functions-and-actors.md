@@ -6,13 +6,13 @@
 - Author: leostera, with AI assistance
 - Start Date: 2026-09-26
 - Updated: 2026-09-26
-- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements the **earlier**, synchronous `actors-v1` design; the asynchronous design below is **not implemented**.
+- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements both the earlier synchronous `actors-v1` design and an **experimental finite, fault-free `actors-v2` slice** of this proposal. The full RFD remains unimplemented.
 
 ## Summary
 
 Use one `actor` declaration for both actors with and without retained state. A stateful actor's `init(args)` produces its initial state; its `handle_message(state, message)` computes the next state. Stateless actors omit `init` and the state argument. Typed `send(address, message)` enqueues a one-way message and returns no reply. A caller that wants a response includes its typed address and a finite correlation ID in the message; the recipient sends a separate response. A callback's state change and outgoing messages commit together, before the recipient can process any of those messages. The first generic messaging profile has finite per-address mailboxes, no loss, duplication, transport faults, restarts, or durability. Fairness and capacity are explicit. Cloudflare Worker, Durable Object, Queue, and storage behaviors require **separate semantic adapters**; none follow from `actor` or `send`. Preserve the finite native checker, temporal properties, source-level witnesses and replay from [RFD0001](RFD0001-initial-language-and-model-checker.md).
 
-This is a **proposal to replace the experimental synchronous actor surface**, not a description of the present checker. `actors-v0`, `actors-v1`, and `cf-core-v0` remain pinned to their existing meanings. A new profile (provisionally `actors-v2`) must be created and tested before any asynchronous actor model can be checked.
+This RFD remains a **Draft**, not a stable contract. `actors-v0`, `actors-v1`, and `cf-core-v0` remain pinned to their existing meanings. The branch now implements a distinct experimental `actors-v2` slice with typed messages, finite FIFO mailboxes, bounded atomic callback commits, fairness, and replay. Dynamic-message temporal observations, fault/restart behavior, adapters, and independent validation remain unfinished.
 
 ## Motivation
 
@@ -41,7 +41,7 @@ The desired mental model is closer to an asynchronous receive loop: the actor ow
 
 ### Actors receive messages and return state
 
-**Illustrative target syntax: not accepted by the current parser.** Types and addresses are finite, and `send` is not a function that waits for a result:
+**Working example on the spike branch** (also in [`examples/actor-messages.fml`](../../examples/actor-messages.fml)). Types and addresses are finite, and `send` is not a function that waits for a result:
 
 ```fml
 type CounterId = Main
@@ -82,8 +82,9 @@ invariant "a reply is not processed before the counter commits" {
 cover "client receives a reply" { Client.at(User).state == Observed }
 
 check OneIncrement {
-  semantics = "actors-v2" // proposed, not implemented
+  semantics = "actors-v2"
   domain Int = 0..1
+  mailbox_bound = 2
   inputs { once send(Counter.at(Main), Inc(Client.at(User), First)) }
   fairness { weak runtime.progress }
 }
@@ -134,7 +135,7 @@ The initial profile rejects external I/O or suspension within a state-transition
 
 A generic mailbox is an in-memory modeling abstraction, not durable actor storage and not a Queue producer/consumer. Backend profiles must specify how a callback and outbox interact with external side effects and failures; if atomic state-and-send commit is not supported by a product, the adapter **must split that operation into truthful transitions** rather than inherit the generic rule. A model may be checked against its declared generic assumptions without implying production conformance.
 
-The current implementation has `actors-v0` functions/actors, `actors-v1` finite keyed actors and synchronous fault-free `call` with suspended callers, and a `cf-core-v0` Worker/D1 parser shim. All remain regression profiles; do not silently reinterpret `call` as `send` or `owner.set` as a returned next state. Introduce a distinct profile and examples for the asynchronous design only when the source-to-checker implementation exists. Decide separately whether to migrate legacy source, keep `worker` as a Cloudflare-only frontend, or retire it with diagnostics. Any trace state/layout change must version artifacts and reject or explicitly migrate previous formats (the spike currently emits format version 3).
+The implementation has `actors-v0` functions/actors, `actors-v1` finite keyed actors and synchronous fault-free `call` with suspended callers, a `cf-core-v0` Worker/D1 parser shim, and a **separate experimental `actors-v2` slice** with inline handlers, one-way `send`, ordered finite mailboxes, and replay. The older profiles remain regression profiles; do not silently reinterpret `call` as `send` or `owner.set` as a returned next state. Decide separately whether to migrate legacy source, keep `worker` as a Cloudflare-only frontend, or retire it with diagnostics. The v2 trace uses format version 4; older profiles retain format 3, and artifacts are checked against their declared profile.
 
 ### Security, privacy and observability
 
@@ -184,7 +185,7 @@ Keep the synchronous spike as the core. It is useful for fault-free direct calls
 ## Prior art and related work
 
 - [RFD0001](RFD0001-initial-language-and-model-checker.md): retain the finite checker, fairness and differentiated Cloudflare resource contracts; revise only the generic actor vocabulary and messaging design.
-- [Actor spike notes](../spikes/actor-generalization.md): `actors-v1` has runnable keyed and synchronous call/replay fixtures. It is a valuable regression corpus, **not** evidence that asynchronous mailboxes are already implemented.
+- [Actor spike notes](../spikes/actor-generalization.md): `actors-v1` remains a keyed synchronous regression corpus; `actors-v2` has an experimental asynchronous end-to-end fixture. Neither is evidence of product-specific delivery semantics or completion of this RFD.
 - [Erlang/OTP `gen_server`](https://www.erlang.org/doc/apps/stdlib/gen_server.html): state-in/state-out callbacks and distinct call/cast/info handling motivate the design. This proposal resembles asynchronous `cast`/message handling more than `handle_call`: OTP synchronous calls carry a reply token, not merely an actor address. FML does not claim OTP supervision or scheduling equivalence.
 - [Riot](https://github.com/leostera/riot-lang): ML-shaped variants, functions and messaging inform the syntax; its process lifecycle is not automatically FML's semantic profile.
 - [TLA+](https://lamport.azurewebsites.net/tla/tla.html): explicit state, actions, fairness and infinite behaviors remain the checker contract.

@@ -1,10 +1,10 @@
 # FlareML
 
-**Model Cloudflare systems. Explore their possible executions. Find design bugs.**
+**Model systems. Explore their possible executions. Find design bugs.**
 
 FML is a standalone, Riot-inspired modeling language—not a language for deploying Workers. Its native Rust checker explores a finite state graph, checks invariants at semantic boundaries, and finds temporal counterexamples, including executions that repeat forever.
 
-**Current status:** the first native vertical slice is implemented: legacy Workers + a primary-only D1 model, all seven temporal patterns below, weak progress fairness, source-mapped reports, and replay. The separate [`spike/actor-generalization`](docs/rfds/RFD0002-functions-and-actors.md) branch also implements typed functions, singleton and finite keyed actors, first-class typed addresses, and direct fault-free actor calls in an experimental `actors-v1` profile. This is **not yet the complete v0 resource set** from [RFD0001](docs/rfds/RFD0001-initial-language-and-model-checker.md) or all of RFD0002. Durable Objects, Queues, KV, buckets, Workflows, restarts, and D1 batches are currently rejected rather than approximated silently.
+**Current status:** the first native vertical slice is implemented: legacy Workers + a primary-only D1 model, all seven temporal patterns below, weak progress fairness, source-mapped reports, and replay. The [`spike/actor-generalization`](docs/rfds/RFD0002-functions-and-actors.md) branch also implements typed functions and addresses, a synchronous experimental `actors-v1` profile, and a separate **experimental asynchronous `actors-v2` slice** with unified actors, FIFO mailboxes and one-way sends. This is **not yet the complete v0 resource set** from [RFD0001](docs/rfds/RFD0001-initial-language-and-model-checker.md) or all of RFD0002. Durable Objects, Queues, KV, buckets, Workflows, restarts, and D1 batches are currently rejected rather than approximated silently.
 
 ## Try it
 
@@ -20,6 +20,9 @@ cargo run -- check examples/lost-update.fml
 cargo run -- check examples/actor-keyed.fml
 cargo run -- check examples/actor-call.fml
 cargo run -- check examples/actor-interleaving.fml
+# The new async actor profile checks and replays a message-response protocol:
+cargo run -- check examples/actor-messages.fml --trace-out /tmp/actor-messages.trace.json
+cargo run -- replay examples/actor-messages.fml /tmp/actor-messages.trace.json
 ```
 
 Buggy examples intentionally exit with code **1**. To install the CLI locally:
@@ -156,9 +159,15 @@ Ranges are inclusive; aliases share the underlying pool. Escaping a pool is inco
 | 3 | Inconclusive exploration or domain cutoff |
 | 4 | Tool, I/O, or replay validation error |
 
-### Experimental actor profile (`actors-v1`, spike branch)
+### Experimental asynchronous actors (`actors-v2`, spike branch)
 
-**Design update:** [draft RFD0002](docs/rfds/RFD0002-functions-and-actors.md) now proposes one `actor` form with state-in/state-out handlers and asynchronous `send`. That design is **not implemented**. The following describes the earlier, synchronous `actors-v1` spike only; it must not be silently reinterpreted as the proposed mailbox model.
+The [message-response fixture](examples/actor-messages.fml) uses one `actor` declaration form, a pure `init(id): State`, `handle_message(state: State, message: Message): State`, and typed `send(address, message)`. Actors without `init` have a one-argument message handler returning `unit`. `once send(Actor.at(key), message)` is an optional external submission; only enabled mailbox-head processing is subject to `weak runtime.progress`. A handler runs to completion in one atomic transition: it returns the next owned state and publishes its staged outgoing sends together, in source order. Each typed actor address has a finite FIFO mailbox; `mailbox_bound = N` is required, and exceeding it is **INCONCLUSIVE**, never a silently dropped message. There is no implicit reply: pass a typed reply address and a correlation ID in the message. The fixture has a replayable cover, a safety invariant, and a format-version-4 trace.
+
+This is a **fault-free, in-memory modeling profile**, not Cloudflare Queue/DO semantics: it has no crashes, retries, durability, I/O within callbacks, timeout, or live suspension. It has no `requests(...)` inspector for generated messages or dynamic temporal message quantification yet. More independent scheduler/fairness and capability validation is still required before RFD0002 is complete.
+
+### Earlier synchronous actor profile (`actors-v1`, spike branch)
+
+The following describes only the older `actors-v1` spike; it is **not** silently reinterpreted as the mailbox model in `actors-v2`.
 
 Typed `let` functions bind to `stateless actor Name { method = function }` or `stateful actor Name(id: Key) { state: State = initial; method = function }`. State is modeled per finite key; `Name.at(key).state` inspects it only in specifications. Singleton stateful actors omit `(id: Key)`. Keyed input slots use `once Name.at(key).method(message)`. `Address<Name>` is typed, serializable model data produced by `Name.at(key)`, unlike the scoped `Actor<State>` owner capability; see [the address-routing example](examples/actor-address.fml). An effectful handler may directly bind `let reply = call(Name.at(key).method, message)` or `call(address.method, message)` (or `call(Name.method, message)` for a singleton/stateless actor). The caller suspends; the callee is independently accepted/scheduled; its committed state and reply precede caller resumption. Internal accept, resume, completion, and reply steps participate in `weak runtime.progress`; external input acceptance remains optional. `requests(Name.method)` ranges over **external** input slots only, not dynamically created calls. [The keyed fixture](examples/actor-keyed.fml) shows isolated accounts and [the interleaving fixture](examples/actor-interleaving.fml) shows a same-key lost update across an actor call.
 

@@ -3,6 +3,7 @@ pub mod checker;
 pub mod diagnostics;
 mod functions;
 pub mod graph;
+mod messaging;
 pub mod model;
 pub mod semantics;
 pub mod syntax;

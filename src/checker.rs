@@ -102,18 +102,30 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
         semantics: p.check.semantics.clone(),
         weak_progress: p.check.fair,
         assumptions: vec![
-            "finite one-shot input workload; unaccepted inputs may remain unaccepted".into(),
+            if p.check.semantics == "actors-v2" {
+                "finite one-shot external send workload; optional inputs may remain unsubmitted"
+                    .into()
+            } else {
+                "finite one-shot input workload; unaccepted inputs may remain unaccepted".into()
+            },
             if p.tables.is_empty() {
                 "no D1 tables selected; external resource failures, crashes, and unknown commit outcomes are not modeled".into()
             } else {
                 "D1 primary-only; no replication, transport failures, crashes, or unknown commit outcomes".into()
             },
-            if p.check.semantics == "actors-v1" {
+            if p.check.semantics == "actors-v2" {
+                format!(
+                    "actors-v2: finite FIFO mailboxes (capacity {} per address), run-to-completion state-in/state-out turns; outgoing sends become visible atomically with state commit; retained state is not durable",
+                    p.check.mailbox_bound.expect("validated profile")
+                )
+            } else if p.check.semantics == "actors-v1" {
                 "actors-v1: finite keyed state and direct typed request/reply; callers suspend across calls; local steps run to the next external effect; state retention is not durability".into()
             } else {
                 "actors-v0: stateless and one-instance stateful actors; local steps run to the next external effect; state retention is not durability".into()
             },
-            if p.check.semantics == "actors-v1" {
+            if p.check.semantics == "actors-v2" {
+                "internal mailbox processing is fault-free when weak progress is declared; optional inputs are not forced; loss, duplication, transport failures, timeouts, restarts, queues, and persistence are not modeled".into()
+            } else if p.check.semantics == "actors-v1" {
                 "actor calls assume eventual fault-free delivery when weak progress is declared; transport failures, timeouts, restarts, queues and persistence beyond D1 are not modeled".into()
             } else {
                 "actor-to-actor calls, per-key instances, restarts, queues, and persistence beyond D1 are not modeled".into()

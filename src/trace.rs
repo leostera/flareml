@@ -26,6 +26,8 @@ pub struct Trace {
     pub clause: Option<usize>,
     pub loop_start: Option<usize>,
     pub weak_progress: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mailbox_bound: Option<usize>,
     pub states: Vec<State>,
     pub actions: Vec<Action>,
 }
@@ -48,7 +50,11 @@ impl Trace {
             trace_states.push(states[g.edges[s][e].to].clone());
         }
         Self {
-            format_version: 3,
+            format_version: if p.check.semantics == "actors-v2" {
+                4
+            } else {
+                3
+            },
             tool_version: env!("CARGO_PKG_VERSION").into(),
             semantics: p.check.semantics.clone(),
             source_hash: source_hash(source),
@@ -58,19 +64,26 @@ impl Trace {
             clause,
             loop_start: walk.loop_start,
             weak_progress: p.check.fair,
+            mailbox_bound: p.check.mailbox_bound,
             states: trace_states,
             actions: chosen,
         }
     }
     pub fn validate(&self, source: &str, p: &Program) -> Result<()> {
         let bad = |s: &str| Error::new(Span::default(), format!("invalid trace: {s}"));
-        if self.format_version != 3 || self.tool_version != env!("CARGO_PKG_VERSION") {
+        let version = if p.check.semantics == "actors-v2" {
+            4
+        } else {
+            3
+        };
+        if self.format_version != version || self.tool_version != env!("CARGO_PKG_VERSION") {
             return Err(bad("unsupported format/tool version"));
         }
         if self.source_hash != source_hash(source)
             || self.check != p.check.name
             || self.semantics != p.check.semantics
             || self.weak_progress != p.check.fair
+            || self.mailbox_bound != p.check.mailbox_bound
         {
             return Err(bad("model, check, profile, or fairness mismatch"));
         }
