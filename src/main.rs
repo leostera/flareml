@@ -1,3 +1,5 @@
+mod run_artifacts;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use flareml::{
     checker::{self, Options},
@@ -79,6 +81,9 @@ enum Command {
         /// Save a counterexample, or a reached witness if no violation was found.
         #[arg(long)]
         trace_out: Option<PathBuf>,
+        /// Parent directory for automatically saved, uniquely named run bundles.
+        #[arg(long, default_value = ".fml/runs")]
+        artifacts_dir: PathBuf,
     },
     /// Re-execute a current-format trace and validate its evidence.
     Replay {
@@ -122,14 +127,69 @@ fn main() -> ExitCode {
             (model, *format)
         }
     };
-    let fail =
-        |status: &str, e: &Error, source: &str| error(format, cli.color, status, e, path, source);
     let source = match read(path, 1_000_000) {
         Ok(s) => s,
         Err(e) => {
-            fail("TOOL_ERROR", &Error::new(Span::default(), e), "");
+            error(
+                format,
+                cli.color,
+                "TOOL_ERROR",
+                &Error::new(Span::default(), e),
+                path,
+                "",
+            );
             return ExitCode::from(4);
         }
+    };
+    let run = if let Command::Check {
+        artifacts_dir,
+        selected,
+        property,
+        max_states,
+        max_depth,
+        timeout,
+        ..
+    } = &cli.command
+    {
+        match run_artifacts::Run::create(
+            artifacts_dir,
+            &source,
+            serde_json::json!({
+                "model": path, "check": selected, "property": property,
+                "max_states": max_states, "max_depth": max_depth,
+                "timeout": { "seconds": timeout.as_secs(), "nanoseconds": timeout.subsec_nanos() }
+            }),
+        ) {
+            Ok(run) => Some(run),
+            Err(e) => {
+                error(
+                    format,
+                    cli.color,
+                    "TOOL_ERROR",
+                    &Error::new(Span::default(), format!("cannot create run artifacts: {e}")),
+                    path,
+                    &source,
+                );
+                return ExitCode::from(4);
+            }
+        }
+    } else {
+        None
+    };
+    let fail = |status: &str, e: &Error, source: &str| {
+        if let Some(run) = &run {
+            if let Err(io) = run.error(&serde_json::json!({"artifact_format_version": 1, "status": status, "error": e, "file": path})) {
+                error(format, cli.color, "TOOL_ERROR", &Error::new(Span::default(), format!("cannot save error report: {io}; original error: {}", e.message)), path, source);
+                return ExitCode::from(4);
+            }
+            eprintln!("Artifacts: {}", run.path.display());
+        }
+        error(format, cli.color, status, e, path, source);
+        ExitCode::from(match status {
+            "INVALID_MODEL" => 2,
+            "INCONCLUSIVE" => 3,
+            _ => 4,
+        })
     };
     match &cli.command {
         Command::Check {
@@ -144,8 +204,7 @@ fn main() -> ExitCode {
             let p = match flareml::compile(&source, selected.as_deref()) {
                 Ok(p) => p,
                 Err(e) => {
-                    fail("INVALID_MODEL", &e, &source);
-                    return ExitCode::from(2);
+                    return fail("INVALID_MODEL", &e, &source);
                 }
             };
             let options = Options {
@@ -160,17 +219,25 @@ fn main() -> ExitCode {
                     let internal = e.message.starts_with("internal:")
                         || e.message.starts_with("invalid trace:");
                     let limit = e.message.starts_with("LIMIT:");
-                    let (status, code) = if internal {
-                        ("TOOL_ERROR", 4)
+                    let status = if internal {
+                        "TOOL_ERROR"
                     } else if limit {
-                        ("INCONCLUSIVE", 3)
+                        "INCONCLUSIVE"
                     } else {
-                        ("INVALID_MODEL", 2)
+                        "INVALID_MODEL"
                     };
-                    fail(status, &e, &source);
-                    return ExitCode::from(code);
+                    return fail(status, &e, &source);
                 }
             };
+            let run = run.as_ref().expect("check run allocated");
+            if let Err(e) = run.report(&report) {
+                return fail(
+                    "TOOL_ERROR",
+                    &Error::new(Span::default(), format!("cannot save run report: {e}")),
+                    &source,
+                );
+            }
+            eprintln!("Artifacts: {}", run.path.display());
             if let Some(output) = trace_out
                 && let Some(trace) = report.witness()
             {
@@ -199,10 +266,14 @@ fn main() -> ExitCode {
                 }
             }
             match format {
-                Format::Json => println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report).expect("report serialization")
-                ),
+                Format::Json => {
+                    let mut value = serde_json::to_value(&report).expect("report serialization");
+                    value["artifacts_dir"] = serde_json::json!(run.path);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&value).expect("report serialization")
+                    );
+                }
                 Format::Text => print!(
                     "{}",
                     diagnostics::render_report(

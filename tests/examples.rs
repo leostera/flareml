@@ -13,6 +13,10 @@ fn every_scenario_has_a_checked_verdict_and_replay() {
         ("atomic-increments.fml", Status::VerifiedInScope),
         ("routed-deposits.fml", Status::VerifiedInScope),
         ("eligibility-check.fml", Status::VerifiedInScope),
+        ("inventory-reservation-bug.fml", Status::Violated),
+        ("inventory-reservation-fixed.fml", Status::VerifiedInScope),
+        ("payment-idempotency-bug.fml", Status::Violated),
+        ("payment-idempotency-fixed.fml", Status::VerifiedInScope),
     ];
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
     let actual: BTreeSet<_> = std::fs::read_dir(&root)
@@ -31,6 +35,9 @@ fn every_scenario_has_a_checked_verdict_and_replay() {
         let r = checker::check(&source, &p, &Options::default()).unwrap();
         assert_eq!(r.status, expected, "{name}");
         for c in r.claims {
+            if name.ends_with("-fixed.fml") && c.kind == flareml::syntax::ClaimKind::Cover {
+                assert_eq!(c.result, "REACHED", "{name}: {}", c.name);
+            }
             if let Some(trace) = c.witness {
                 trace.validate(&source, &p).unwrap();
             }

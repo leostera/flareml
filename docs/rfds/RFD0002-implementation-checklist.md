@@ -40,15 +40,21 @@ Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 - [x] Generated three-state temporal graphs include shared action IDs, intermittent enablement and fair self-edges.
 - [x] Compare temporal outcomes with an independent recurrent-edge-subset oracle; independently validate produced walks, original enabledness fairness, and failed formulas using fixed points.
 - [x] Source/CLI/JSON, color/NO_COLOR, malformed inputs, source/trace mutation, current-format rejection, domain limits, atomic failure and replay regressions.
+- [x] 160 end-to-end Boolean self-message cases checked against an independent orbit/cycle oracle (safety, reachability, eventuality, recurrence, stabilization; fair/unfair).
+- [x] Actor-renaming/declaration-reordering metamorphic checks and concrete counterexamples under increased mailbox bounds.
+- [x] Default source/configuration/report/all-witness bundles; snapshot replay, corruption rejection, safe filenames, incomplete/invalid reports, I/O failure and concurrent allocation tests.
+- [x] Inventory reservation and payment idempotency bug/repair pairs, including non-vacuous completion queries.
 
 ## Remaining validation before calling the core stable
 
-- [ ] Run and review coverage/sanitizer-instrumented fuzz campaigns on source and replay, retaining minimized findings as checked-in tests.
+- [x] Run and inspect initial coverage/sanitizer-instrumented source and replay campaigns. Both passed; no findings to minimize (details below).
 - [ ] Review coverage gaps and run longer seeded campaigns, especially deeply nested valid source and nearly-valid traces; passing random invalid bytes is not enough.
 - [ ] Independent implementation review against the execution/property contract. Finite oracles and replay agreement are not a proof of correctness.
 - [ ] Establish measured practical state-space limits on larger protocols before introducing optimization claims.
 
-Local tooling status: `cargo-fuzz` is installed. A nightly toolchain download was attempted twice but timed out fetching rustc; **no instrumented local campaign is claimed**. Do not make nightly an application dependency. `.github/workflows/fuzz.yml` adds a separate optional manual/weekly instrumented job with valid source/trace seeds and artifact retention; its remote execution is not implied by adding the workflow.
+Instrumented evidence: [GitHub Actions run 36258519843](https://github.com/leostera/flareml/actions/runs/36258519843), on core revision `f582520`, passed both nightly sanitizer targets with valid source/trace seeds and seed `12345`. Source: **791,126 executions in 121 seconds**; trace JSON: **3,018,940 executions in 121 seconds**. Logs were inspected; corpus artifacts were uploaded. These are short smoke campaigns, not a coverage-completeness claim, and predate the run-bundle additions. Longer campaigns and coverage-gap review remain open.
+
+Local nightly installation previously timed out; no instrumented local campaign is claimed. Nightly remains optional, only for fuzzing.
 
 ## Deferred scope, not generic-core blockers
 

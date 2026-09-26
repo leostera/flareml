@@ -1,0 +1,55 @@
+// Repair: deduplicate by payment key at the atomic charge boundary.
+// Two deliveries of payment A, one delivery of distinct payment B.
+// Ledger update and charge are ONE modeled turn. This does not prove an
+// application-side cache can atomically deduplicate a separate payment API.
+// Duplicate delivery is an explicit workload, not an engine fault mode.
+// Processor represents the charge boundary; no crashes, lost replies, refunds,
+// or separate non-transactional external charge API are modeled.
+type PaymentId = PaymentA | PaymentB
+type Request = Pay(PaymentId) | Receipt
+type Debit = Debit
+type Ledger = Fresh | Recorded
+type PaymentState = PaymentState { ledger: Ledger, charges: Int, deliveries: Int }
+actor Gateway {
+  handle_message(request: Request): unit {
+    match request {
+      | Pay(id) -> send(Processor.at(id), Debit)
+      | Receipt -> ()
+    }
+  }
+}
+actor Processor(id: PaymentId) {
+  init(id: PaymentId): PaymentState { PaymentState { ledger: Fresh, charges: 0, deliveries: 0 } }
+  handle_message(state: PaymentState, request: Debit): PaymentState {
+    send(Gateway, Receipt)
+    match state.ledger {
+      | Fresh -> PaymentState { ledger: Recorded, charges: state.charges + 1, deliveries: state.deliveries + 1 }
+      | Recorded -> PaymentState { ledger: Recorded, charges: state.charges, deliveries: state.deliveries + 1 }
+    }
+  }
+}
+property "at most one charge per payment key" {
+  always (forall (id in PaymentId) { Processor.at(id).state.charges <= 1 })
+}
+property "distinct payments can both charge" {
+  reachable (Processor.at(PaymentA).state.charges == 1 && Processor.at(PaymentB).state.charges == 1)
+}
+property "the duplicate can be fully processed" {
+  reachable (Processor.at(PaymentA).state.deliveries == 2 && Processor.at(PaymentB).state.deliveries == 1)
+}
+property "submitted payments eventually charge" {
+  forall (id in PaymentId) {
+    (exists (i in inputs(Gateway)) { i.payload == Pay(id) && i.submitted })
+      leads_to Processor.at(id).state.charges >= 1
+  }
+}
+check DuplicatePayment {
+  domain Int = 0..2
+  mailbox_bound = 3
+  inputs {
+    once send(Gateway, Pay(PaymentA))
+    once send(Gateway, Pay(PaymentA))
+    once send(Gateway, Pay(PaymentB))
+  }
+  fairness { weak runtime.progress }
+}

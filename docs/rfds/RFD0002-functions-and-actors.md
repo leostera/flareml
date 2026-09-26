@@ -159,6 +159,7 @@ Identical payloads get distinct slots; slots never recycle. Temporal bindings th
 - `graph.rs` / `temporal.rs`: reachability, fair recurrent SCCs, restricted temporal checking.
 - `trace.rs`: current-format artifacts; replay re-executes actions, compares every state and provenance, validates source/check/bounds, loop closure and original enabledness. A fixed-point interpreter independently validates the failed formula.
 - `main.rs`: clap-derived CLI; `diagnostics.rs`: ANSI-safe text reports separate from JSON.
+- `run_artifacts.rs`: CLI run bundles under `.fml/runs/<unique-id>/` (override parent with `--artifacts-dir`): exact source, requested configuration/source hash/tool version, report, and every available witness. `report.json` is the final completion marker. Verified properties have no fabricated proof trace; incomplete runs retain only genuine evidence. Source/trace replay is authoritative for witnesses; a saved report is not a proof certificate. Unreadable source and storage errors can prevent bundle completion.
 
 Current trace format is **6**. Older formats, unknown fields, altered actions, snapshots, identities, bounds, or source hashes are rejected. The format number is not a semantics switch.
 

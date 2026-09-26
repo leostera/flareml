@@ -106,7 +106,7 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
                 p.check.mailbox_bound.expect("validated mailbox bound")
             ),
             "processing is fault-free; weak progress, when declared, prevents starvation of continuously enabled mailboxes; optional inputs are not forced".into(),
-            "loss, duplication, transport failures, timeouts, restarts, external I/O, and persistence are not modeled".into(),
+            "the engine does not inject loss, duplication, transport failures, timeouts, restarts, external I/O, or persistence; represent such behavior explicitly in the model".into(),
             if let Some(bound) = p.check.message_bound {
                 format!(
                     "message observations: {bound} lifetime slots per actor declaration, including external sends; no slot reuse; exhaustion is inconclusive"

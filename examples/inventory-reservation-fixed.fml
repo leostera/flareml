@@ -1,0 +1,51 @@
+// Repair: reserve the last item atomically when making the offer.
+// Buyers commit only after an offer; reservation expiry is not modeled.
+// Two buyers, one item, no cancellations, failures, restocks, or retries.
+type BuyerId = Alice | Bob
+type Stock = Available | Reserved
+type Outcome = Waiting | Won | Lost
+type BuyerState = BuyerState { me: Actor<Buyer>, outcome: Outcome }
+type BuyerMessage = Start | Offer | Accepted | Rejected
+type InventoryMessage = Probe(Actor<Buyer>) | Commit(Actor<Buyer>)
+actor Buyer(id: BuyerId) {
+  init(id: BuyerId): BuyerState { BuyerState { me: Buyer.at(id), outcome: Waiting } }
+  handle_message(state: BuyerState, message: BuyerMessage): BuyerState {
+    match message {
+      | Start -> { send(Inventory, Probe(state.me)) state }
+      | Offer -> { send(Inventory, Commit(state.me)) state }
+      | Accepted -> BuyerState { me: state.me, outcome: Won }
+      | Rejected -> BuyerState { me: state.me, outcome: Lost }
+    }
+  }
+}
+actor Inventory {
+  init(): Stock { Available }
+  handle_message(stock: Stock, message: InventoryMessage): Stock {
+    match message {
+      | Probe(buyer) -> {
+          match stock {
+            | Available -> { send(buyer, Offer) Reserved }
+            | Reserved -> { send(buyer, Rejected) Reserved }
+          }
+        }
+      | Commit(buyer) -> { send(buyer, Accepted) Reserved }
+    }
+  }
+}
+property "one item cannot be promised to both buyers" {
+  always (!(Buyer.at(Alice).state.outcome == Won && Buyer.at(Bob).state.outcome == Won))
+}
+property "both buyers can finish" {
+  reachable (Buyer.at(Alice).state.outcome != Waiting && Buyer.at(Bob).state.outcome != Waiting)
+}
+property "submitted purchases finish" {
+  forall (id in BuyerId) {
+    (exists (i in inputs(Buyer)) { i.target == Buyer.at(id) && i.submitted })
+      leads_to Buyer.at(id).state.outcome != Waiting
+  }
+}
+check LastItem {
+  mailbox_bound = 2
+  inputs { once send(Buyer.at(Alice), Start) once send(Buyer.at(Bob), Start) }
+  fairness { weak runtime.progress }
+}
