@@ -1,0 +1,26 @@
+// One participant models a sequential algorithm. Each Step is an observable
+// algorithm step, not a thread or a deployment. Self-sends continue the work.
+type Phase = Idle | Prepared | Committed | Finished
+type Event = Start | Step
+actor Workflow {
+  init(): Phase { Idle }
+  handle_message(state: Phase, event: Event): Phase {
+    match state {
+      | Idle -> { send(Workflow, Step) Prepared }
+      | Prepared -> { send(Workflow, Step) Committed }
+      | Committed -> Finished
+      | Finished -> Finished
+    }
+  }
+}
+property "submitted work finishes" {
+  forall (i in inputs(Workflow)) { i.submitted leads_to Workflow.state == Finished }
+}
+property "preparation is observable" { reachable (Workflow.state == Prepared) }
+property "commit is observable" { reachable (Workflow.state == Committed) }
+property "finished stays finished" { always (Workflow.state == Finished implies always (Workflow.state == Finished)) }
+check Sequential {
+  mailbox_bound = 1
+  inputs { once send(Workflow, Start) }
+  fairness { weak runtime.progress }
+}

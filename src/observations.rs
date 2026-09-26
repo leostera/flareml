@@ -84,10 +84,7 @@ impl Program {
                     .map(|e| self.eval(e, &Env::new(), s))
                     .transpose()?
                     .unwrap_or(Value::Unit);
-                Ok(Value::Address(
-                    self.handlers[&input.handler].actor.clone(),
-                    Box::new(key),
-                ))
+                Ok(Value::Address(input.actor.clone(), Box::new(key)))
             }
             _ => Err(Error::new(span, "unknown input observation field")),
         }

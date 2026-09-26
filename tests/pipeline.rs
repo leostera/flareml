@@ -1,80 +1,64 @@
 use flareml::{
     checker::{self, Options, Status},
     compile,
-    semantics::{Env, Value},
-    syntax::{ClaimKind, Expr, ExprKind, Span},
+    semantics::Env,
+    syntax::{Expr, ExprKind, Span},
     trace::Trace,
 };
 use std::time::Duration;
-const BUG: &str = include_str!("../examples/login-bug.fml");
-const FIXED: &str = include_str!("../examples/login-fixed.fml");
-const STARVATION: &str = include_str!("../examples/starvation.fml");
+const FIXED: &str = include_str!("../examples/counter-replies.fml");
+const BUG: &str = include_str!("../examples/missing-reply.fml");
 fn run(source: &str) -> checker::Report {
-    let p = compile(source, None).unwrap();
-    checker::check(source, &p, &Options::default()).unwrap()
+    checker::check(source, &compile(source, None).unwrap(), &Options::default()).unwrap()
 }
 fn tiny(claim: &str) -> String {
-    format!("{claim}\ncheck Main {{ semantics = \"cf-core-v0\" }}")
+    format!("{claim}\ncheck Main {{ mailbox_bound = 1 }}")
 }
 
 #[test]
-fn login_bug_has_short_source_mapped_witness() {
+fn missing_reply_has_a_source_mapped_fair_lasso() {
     let r = run(BUG);
     assert_eq!(r.status, Status::Violated);
     let w = r.witness().unwrap();
     assert_eq!(w.actions.len(), 4);
-    assert!(w.actions.last().unwrap().description.contains("Allowed"));
-    assert!(w.actions.last().unwrap().span.start > 0);
-    assert_eq!(w.kind, ClaimKind::Invariant);
+    assert_eq!(w.loop_start, Some(3));
+    assert!(w.actions[1].span.start > 0);
+    w.validate(BUG, &compile(BUG, None).unwrap()).unwrap();
 }
 #[test]
-fn login_fixed_checks_all_interleavings() {
+fn reply_protocol_explores_submission_commit_and_delivery() {
     let r = run(FIXED);
     assert_eq!(r.status, Status::VerifiedInScope);
     assert!(r.complete);
-    assert_eq!(r.states, 25);
+    assert_eq!((r.states, r.edges), (4, 7));
     assert!(r.claims.iter().any(|c| c.result == "REACHED"));
 }
 #[test]
-fn lack_of_fairness_has_a_valid_lasso() {
-    let r = run(STARVATION);
-    assert_eq!(r.status, Status::Violated);
-    let t = r.witness().unwrap();
-    assert!(t.loop_start.is_some());
-    t.validate(STARVATION, &compile(STARVATION, None).unwrap())
-        .unwrap();
-}
-#[test]
 fn traces_round_trip_but_reject_tampering() {
-    for src in [BUG, STARVATION] {
+    for src in [BUG, FIXED] {
         let p = compile(src, None).unwrap();
         let t = run(src).witness().unwrap().clone();
-        let json = serde_json::to_string(&t).unwrap();
-        let decoded: Trace = serde_json::from_str(&json).unwrap();
+        let decoded: Trace = serde_json::from_str(&serde_json::to_string(&t).unwrap()).unwrap();
         decoded.validate(src, &p).unwrap();
-        let mut broken = t.clone();
-        broken.actions[0].id = "fake".into();
-        assert!(broken.validate(src, &p).is_err());
-        let mut broken = t.clone();
-        broken.states[0].tables.clear();
-        assert!(broken.validate(src, &p).is_err());
-        let mut broken = t.clone();
-        broken.format_version = 999;
-        assert!(broken.validate(src, &p).is_err());
+        for field in 0..8 {
+            let mut broken = t.clone();
+            match field {
+                0 => broken.actions[0].id = "fake".into(),
+                1 => broken.states[0].mailboxes.clear(),
+                2 => broken.format_version = 999,
+                3 => broken.loop_start = Some(usize::MAX),
+                4 => broken.actions[0].fair = true,
+                5 => broken.actions[0].span.start += 1,
+                6 => broken.actions[0].description.push('!'),
+                _ => broken.claim = "absent".into(),
+            }
+            assert!(broken.validate(src, &p).is_err(), "mutation {field}");
+        }
         assert!(t.validate(&format!("{src}\n"), &p).is_err());
     }
 }
 #[test]
-fn replay_rejects_invalid_loop() {
-    let mut t = run(STARVATION).witness().unwrap().clone();
-    t.loop_start = Some(usize::MAX);
-    assert!(
-        t.validate(STARVATION, &compile(STARVATION, None).unwrap())
-            .is_err()
-    );
-}
-#[test]
-fn cutoffs_are_inconclusive() {
+fn exploration_cutoffs_are_inconclusive() {
     let p = compile(FIXED, None).unwrap();
     for options in [
         Options {
@@ -95,20 +79,6 @@ fn cutoffs_are_inconclusive() {
         assert!(!r.complete);
         assert!(r.cutoff.is_some());
     }
-}
-#[test]
-fn initial_invariant_is_checked() {
-    let src = tiny("invariant \"initial\" { false }");
-    let r = run(&src);
-    assert_eq!(r.status, Status::Violated);
-    assert!(r.witness().unwrap().actions.is_empty());
-}
-#[test]
-fn terminal_eventuality_needs_a_lasso() {
-    let src = tiny("property \"never\" { eventually false }");
-    let r = run(&src);
-    assert_eq!(r.status, Status::Violated);
-    assert_eq!(r.witness().unwrap().loop_start, Some(0));
 }
 #[test]
 fn temporal_operators_boundary_cases() {
@@ -144,32 +114,85 @@ fn temporal_operators_boundary_cases() {
 #[test]
 fn temporal_operators_on_changing_states() {
     for formula in [
-        "r.accepted leads_to r.completed",
-        "eventually always (r.completed || not r.accepted)",
-        "always eventually (r.completed || not r.accepted)",
-        "always (r.completed implies always r.completed)",
+        "m.sent leads_to m.processed",
+        "eventually always (m.processed || not m.sent)",
+        "always eventually (m.processed || not m.sent)",
+        "always (m.processed implies always m.processed)",
     ] {
-        let src = FIXED.replace("r.accepted leads_to r.completed", formula);
-        assert_eq!(run(&src).status, Status::VerifiedInScope, "{formula}");
+        assert_eq!(
+            run(&FIXED.replace("m.sent leads_to m.processed", formula)).status,
+            Status::VerifiedInScope,
+            "{formula}"
+        );
     }
 }
 #[test]
-fn property_selection_is_explicit() {
-    let p = compile(BUG, None).unwrap();
-    let r = checker::check(
-        BUG,
-        &p,
-        &Options {
-            property: Some("an accepted login eventually responds".into()),
-            ..Options::default()
-        },
-    )
-    .unwrap();
+fn unsupported_temporal_forms_are_rejected() {
+    for formula in [
+        "always eventually always true",
+        "(always true) || (eventually false)",
+        "not (always false)",
+        "exists (m in messages(Client)) { eventually m.processed }",
+        "forall (x in [true, false]) { eventually x }",
+    ] {
+        let src = format!("{FIXED}\nproperty \"unsupported\" {{ {formula} }}");
+        assert!(compile(&src, None).is_err(), "{formula}");
+    }
+}
+#[test]
+fn effects_and_unknown_names_cannot_hide_in_properties() {
+    for body in [
+        "send(Client.at(User), Counted(First, 0)) == ()",
+        "true || unknown_name",
+    ] {
+        assert!(
+            compile(
+                &format!("{FIXED}\nproperty \"bad\" {{ always ({body}) }}"),
+                None
+            )
+            .is_err()
+        );
+    }
+}
+#[test]
+fn syntax_and_type_errors_fail_closed() {
+    for src in [
+        FIXED.replace("Counter.at(Main)", "Counter.at(User)"),
+        FIXED.replace("| Counted(_, _) -> Observed", ""),
+        FIXED.replace("| Counted(_, _) -> Observed", "| Counted(_, _) -> First"),
+        FIXED.replace("weak runtime.progress", "strong runtime.progress"),
+        FIXED.replace("weak runtime.progress", "weak everything"),
+        format!("{FIXED}\nkv Cache : KV<Bool, Bool>"),
+        format!("{FIXED}\nqueue Events : Queue<Bool> {{}}"),
+    ] {
+        assert!(compile(&src, None).is_err(), "{src}");
+    }
+}
+#[test]
+fn empty_temporal_quantifier_reports_vacuity() {
+    let src = FIXED.replace(
+        "once send(Counter.at(Main), Inc(Client.at(User), First))",
+        "",
+    );
+    let r = run(&src);
     assert_eq!(r.status, Status::VerifiedInScope);
-    assert_eq!(r.claims.len(), 1);
+    assert!(r.claims.iter().any(|c| {
+        c.note
+            .as_ref()
+            .is_some_and(|n| n.contains("empty temporal"))
+    }));
+    assert!(r.claims.iter().any(|c| c.result == "UNREACHABLE"));
+}
+#[test]
+fn multiple_checks_and_properties_require_explicit_selection() {
+    let src = format!("{FIXED}\ncheck Other {{ mailbox_bound = 1 }}");
+    assert!(compile(&src, None).is_err());
+    assert!(compile(&src, Some("OneIncrement")).is_ok());
+    assert!(compile(&src, Some("missing")).is_err());
+    let p = compile(FIXED, None).unwrap();
     assert!(
         checker::check(
-            BUG,
+            FIXED,
             &p,
             &Options {
                 property: Some("missing".into()),
@@ -180,169 +203,19 @@ fn property_selection_is_explicit() {
     );
 }
 #[test]
-fn unsupported_temporal_forms_are_rejected() {
-    for formula in [
-        "always eventually always true",
-        "(always true) || (eventually false)",
-        "not (always false)",
-        "exists (r in requests(LoginAPI.handle_request)) { eventually r.completed }",
-    ] {
-        let src=FIXED.replace("forall (r in requests(LoginAPI.handle_request)) {\n    r.accepted leads_to r.completed\n  }",formula);
-        assert!(compile(&src, None).is_err(), "{formula}");
-    }
-}
-#[test]
-fn effects_cannot_hide_in_invariants_or_expressions() {
-    for body in [
-        "AppDB.User.get(Alice) == None",
-        "respond(Allowed) == respond(Allowed)",
-        "true || unknown_name",
-    ] {
-        let src = FIXED.replace(
-            "cover \"an existing user can log in\"",
-            &format!("invariant \"bad\" {{ {body} }}\ncover \"an existing user can log in\""),
-        );
-        assert!(compile(&src, None).is_err(), "{body}");
-    }
-}
-#[test]
-fn syntax_and_type_errors_fail_closed() {
-    for src in [
-        FIXED.replace("request.user_id", "request.missing"),
-        FIXED.replace("| None -> respond(Denied)", ""),
-        FIXED.replace("respond(Denied)", "respond(Alice)"),
-        FIXED.replace("primary_key", ""),
-        FIXED.replace("cf-core-v0", "invented-semantics"),
-        FIXED.replace("weak runtime.progress", "strong runtime.progress"),
-        FIXED.replace("weak runtime.progress", "weak everything"),
-        format!("{FIXED}\nkv Cache : KV<UserId, UserId>"),
-        format!("{FIXED}\nqueue Events : Queue<UserId> {{}}"),
-    ] {
-        assert!(compile(&src, None).is_err(), "{src}");
-    }
-}
-#[test]
-fn invalid_initial_schema_is_not_a_violation() {
-    let src = FIXED.replace(
-        "[User { id: Alice }]",
-        "[User { id: Alice }, User { id: Alice }]",
-    );
-    let p = compile(&src, None).unwrap();
-    assert!(
-        checker::check(&src, &p, &Options::default())
-            .unwrap_err()
-            .message
-            .contains("initial constraint")
-    );
-}
-#[test]
-fn empty_quantifier_is_reported_as_vacuous() {
-    let src = FIXED
-        .replace(
-            "once LoginAPI.handle_request(LoginRequest { user_id: Alice })",
-            "",
-        )
-        .replace(
-            "once LoginAPI.handle_request(LoginRequest { user_id: Bob })",
-            "",
-        );
-    let r = run(&src);
-    assert_eq!(r.status, Status::VerifiedInScope);
-    assert!(
-        r.claims
-            .iter()
-            .any(|c| c.note.as_ref().is_some_and(|n| n.contains("vacuous")))
-    );
-    assert!(r.claims.iter().any(|c| c.result == "UNREACHABLE"));
-}
-#[test]
-fn multiple_checks_require_selection() {
-    let src = format!("{FIXED}\ncheck Other {{ semantics = \"cf-core-v0\" }}");
-    assert!(compile(&src, None).is_err());
-    assert!(compile(&src, Some("Login")).is_ok());
-    assert!(compile(&src, Some("missing")).is_err());
-}
-#[test]
-fn aliases_and_string_domains() {
-    let src = FIXED
-        .replace("type UserId = Alice | Bob", "type UserId = String")
-        .replace("Alice", "\"alice\"")
-        .replace("Bob", "\"bob\"")
-        .replace(
-            "check Login {",
-            "check Login { domain String = [\"alice\", \"bob\"]",
-        );
-    assert_eq!(run(&src).status, Status::VerifiedInScope);
-}
-#[test]
-fn deeply_nested_input_is_rejected() {
-    let src = tiny(&format!(
-        "invariant \"deep\" {{ {}true{} }}",
-        "(".repeat(150),
-        ")".repeat(150)
-    ));
-    assert!(compile(&src, None).unwrap_err().message.contains("nesting"));
-}
-#[test]
-fn unicode_strings_preserve_byte_spans() {
-    let src = tiny("invariant \"不存在\" { false }");
+fn unicode_strings_and_source_spans_are_preserved() {
+    let src = tiny("property \"不存在\" { always false }");
     let r = run(&src);
     assert_eq!(r.status, Status::Violated);
     assert_eq!(r.claims[0].name, "不存在");
-}
-
-const MUTATION: &str = r#"
-type Id = A
-type Reply = Done | Rejected
-d1 DB { table Counter { id: Id primary_key value: Int } }
-worker API {
-  change(request: Id): Reply {
-    let first = DB.Counter.update(request, Counter { id: request, value: 1 });
-    match first {
-      | Err(_) -> respond(Rejected)
-      | Ok(_) -> {
-        let second = DB.Counter.update(request, Counter { id: request, value: 2 });
-        match second { | Err(_) -> respond(Rejected) | Ok(_) -> respond(Done) }
-      }
-    }
-  }
-}
-invariant "intermediate writes are observable" {
-  forall (row in DB.Counter.rows) { row.value == 0 || row.value == 2 }
-}
-check Main {
- semantics = "cf-core-v0"
- domain Int = 0..2
- init { DB.Counter = [Counter { id: A, value: 0 }] }
- inputs { once API.change(A) }
- fairness { weak runtime.progress }
-}
-"#;
-#[test]
-fn invariant_checked_between_writes_in_one_handler() {
-    let r = run(MUTATION);
-    assert_eq!(r.status, Status::Violated);
-    let t = r.witness().unwrap();
-    assert!(
-        t.actions
-            .last()
-            .unwrap()
-            .description
-            .contains("update completes")
-    );
-    assert!(t.actions.len() < 7);
-}
-#[test]
-fn scope_escape_is_inconclusive_not_wrapped_or_pruned() {
-    let src = MUTATION.replace("value: 1", "value: 3");
-    let r = run(&src);
-    assert_eq!(r.status, Status::Inconclusive);
-    assert!(r.cutoff.unwrap().contains("escapes domain"));
+    r.witness()
+        .unwrap()
+        .validate(&src, &compile(&src, None).unwrap())
+        .unwrap();
 }
 #[test]
 fn pure_arithmetic_uses_checked_integers() {
     let p = compile(FIXED, None).unwrap();
-    let s = p.initial().unwrap();
     let span = Span::default();
     let e = Expr {
         kind: ExprKind::Binary(
@@ -359,20 +232,20 @@ fn pure_arithmetic_uses_checked_integers() {
         span,
     };
     assert!(
-        p.eval(&e, &Env::new(), &s)
+        p.eval(&e, &Env::new(), &p.initial().unwrap())
             .unwrap_err()
             .message
             .contains("overflow")
     );
 }
 #[test]
-fn property_views_do_not_execute_reads() {
+fn property_observations_cannot_mutate_state() {
     let p = compile(FIXED, None).unwrap();
     let s = p.initial().unwrap();
     let before = s.clone();
-    let _ = p
-        .predicate(&p.model.claims[0].body, &Env::new(), &s)
+    p.predicate(&p.model.claims[0].body, &Env::new(), &s)
         .unwrap();
     assert_eq!(s, before);
-    assert_eq!(s.frames[0].response, Value::none());
+    assert!(s.messages.is_empty());
+    assert!(s.input_submitted.iter().all(|x| !x));
 }

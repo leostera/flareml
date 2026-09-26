@@ -1,37 +1,26 @@
-// A dispatcher routes each deposit to the account address carried in its input.
-// Historical actors-v1 profile: addresses are transferable data, not state owners.
+// Transferable addresses route messages without exposing owned account state.
 type AccountId = Alice | Bob
-type Reply = Balance(Int)
-type Dispatch = Dispatch { target: Address<Account>, amount: Int }
-
-let deposit = (owner: Actor<Int>, amount: Int): Reply {
-  owner.set(owner.state + amount)
-  Balance(owner.state)
+type AccountMessage = Deposit(Int)
+type Route = Route { target: Address<Account>, amount: Int }
+actor Account(id: AccountId) {
+  init(id: AccountId): Int { 0 }
+  handle_message(state: Int, message: AccountMessage): Int {
+    match message { | Deposit(amount) -> state + amount }
+  }
 }
-stateful actor Account(id: AccountId) {
-  state: Int = 0
-  deposit = deposit
+actor Router {
+  handle_message(message: Route): unit { send(message.target, Deposit(message.amount)) }
 }
-
-let forward = (input: Dispatch): Reply {
-  let answer = call(input.target.deposit, input.amount)
-  answer
-}
-stateless actor API { send = forward }
-
-invariant "addresses select independent owners" {
-  Account.at(Alice).state <= 1 && Account.at(Bob).state <= 1
-}
-property "replies return under fair progress" {
-  forall (r in requests(API.send)) { r.accepted leads_to r.completed }
-}
-
-check AddressRouting {
-  semantics = "actors-v1"
+property "accounts are isolated" { always (Account.at(Alice).state <= 1 && Account.at(Bob).state <= 1) }
+property "both deposits can finish" { reachable (Account.at(Alice).state == 1 && Account.at(Bob).state == 1) }
+property "generated deposits finish" { forall (m in messages(Account)) { m.sent leads_to m.processed } }
+check Deposits {
   domain Int = 0..2
+  mailbox_bound = 2
+  message_bound = 2
   inputs {
-    once API.send(Dispatch { target: Account.at(Alice), amount: 1 })
-    once API.send(Dispatch { target: Account.at(Bob), amount: 1 })
+    once send(Router, Route { target: Account.at(Alice), amount: 1 })
+    once send(Router, Route { target: Account.at(Bob), amount: 1 })
   }
   fairness { weak runtime.progress }
 }

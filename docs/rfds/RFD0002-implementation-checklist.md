@@ -1,74 +1,72 @@
-# RFD0002 — implementation and acceptance checklist
+# RFD0002 — implementation and acceptance
 
-Authoritative contract: [RFD0002 — Functions and actors as the modeling core](RFD0002-functions-and-actors.md). Branch: `spike/actor-generalization`.
+Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 
-**Status:** the generic, fault-free actor core is implemented with tests. The newly agreed single-`property` surface is **not implemented**. This is **not full RFD/release acceptance**: claim-syntax migration, the separate product-adapter gate and coverage-instrumented fuzz campaign below remain open. Do not substitute generic mailbox behavior for Cloudflare contracts.
+## Implemented
 
-## Generic language and scheduler
+### One language, one engine
 
-- [x] One `actor` form; singleton and finite keyed identities; stateful `init` plus state-in/state-out `handle_message`; stateless one-argument callbacks.
-- [x] Typed transferable addresses, exhaustive message matching, transitive pure/send/inspector restrictions, no escaping owner capabilities.
-- [x] Pure identity-only initialization after address enumeration; no configuration, send, or resource effects in `init`.
-- [x] FIFO mailboxes per typed address; nondeterministic sender/target scheduling; separate optional input submission and atomic callback commit.
-- [x] Ordered staged sends, including nested helpers and self-sends. No reply can be processed before its sender commits.
-- [x] Required per-address `mailbox_bound`; explicit cutoff rather than dropping, disabling, or partly committing an overflowing send.
+- [x] One actor form, pure singleton/keyed initialization, state-in/state-out handlers and one-way typed sends.
+- [x] No `semantics` selector, legacy parser/profile dispatch, Worker/D1 primitives, owner capabilities, synchronous calls, continuation frames, or old trace readers.
+- [x] Shared local statement evaluator for pure functions and message turns; only turns receive an outbox.
+- [x] Stable Rust toolchain and normal CI; clap-derived CLI.
+- [x] Current-only examples for sequential computation, eligibility policy, replies, missing replies, routed accounts, lost updates, and their atomic repair.
 
-Evidence: [`tests/messaging.rs`](../../tests/messaging.rs), [`tests/actor_hardening.rs`](../../tests/actor_hardening.rs), [`examples/counter-replies.fml`](../../examples/counter-replies.fml).
+### Property surface
 
-## Properties, identity, fairness and evidence
+- [x] Only `property` declarations. Explicit `always`, supported temporal forms, and whole-body `reachable` over pure predicates.
+- [x] Reject bare predicates and nested/mixed reachability. `exists` remains data quantification.
+- [x] Whole-body safety is checked at initialization and as successor states are discovered, including before a later sibling hits a search limit.
+- [x] Do not misclassify `always eventually` as safety; retain conjunction/stable-quantifier temporal checking.
+- [x] Zero-step reachability, reached witnesses on incomplete graphs, unreachable only after closure, non-failing unreachable exit policy.
+- [x] Property selection, source spans, current-format serialization, finite/lasso replay and tamper detection.
+- [x] Count unreached response antecedents rather than labeling an entire message property vacuous because spare slots are unused.
 
-- [x] `inputs(Actor)` includes all declared external slots; typed payload/target plus monotone submission/processing flags.
-- [x] `messages(Actor)` includes all potential lifetime slots, even before generation; explicit `message_bound` per actor declaration, never reused. Covers expose reached antecedents; unused slots are not mistaken for an empty initial collection.
-- [x] Identical payloads remain separate messages/inputs. Processing an input is distinct from processing its follow-up/reply.
-- [x] Fair/unfair reply progress, optional-input starvation, a busy self-sender versus another actor, and a missing-reply failure under fairness.
-- [x] Independent FIFO reference machine compares all successor labels, fairness, queue contents, external observations and cutoffs for two forwarding actors across workloads and capacities.
-- [x] Existing independent recurrent-edge temporal oracle remains passing.
-- [x] Format-5 v2 trace serialization, metadata/bound/provenance checking, source-mapped sends, finite and lasso replay. Old v2 format 4 is rejected; old profiles keep format 3.
-- [x] Public CLI safety/liveness/JSON/replay tests, colored output, `NO_COLOR`, and no ANSI escapes in JSON.
+### Execution and observations
 
-Evidence: [`tests/message_observations.rs`](../../tests/message_observations.rs), [`tests/messaging_oracle.rs`](../../tests/messaging_oracle.rs), [`tests/temporal_oracle.rs`](../../tests/temporal_oracle.rs), [`tests/cli.rs`](../../tests/cli.rs).
+- [x] Finite FIFO mailboxes, nondeterministic inter-address scheduling, optional external submissions, separate enqueue/processing transitions.
+- [x] Atomic state/outbox commit; nested helper sends preserve order; self-send follows dequeue and sees committed state.
+- [x] Capacity overflow produces inconclusive, never partial commit/drop/disabled-send semantics.
+- [x] Stable input observations and bounded lifetime message identities, including generated and identical-payload messages. No slot recycling.
+- [x] Fair/unfair progress, optional-input starvation, missing replies under fairness, and busy self-sender versus another mailbox.
+- [x] Typed addresses and exhaustive branches; transitive inspection/send restrictions; closed non-recursive data.
+- [x] Explicit host bounds for syntax, call/data depth, expansion, value size, identities, local evaluation work and temporal expansion (including empty inner domains).
 
-## Next handoff: one property declaration — not implemented
+## Independent validation
 
-- [ ] Add top-level `reachable P` with a pure state predicate; keep `exists` as data quantification. Reject bare predicate properties and unsupported nested/mixed reachability/temporal forms.
-- [ ] Classify `property { always P }` as safety when P is a state predicate, preserving initial-state and early successor checks before graph closure; do not misclassify `always eventually P`.
-- [ ] Route `property { reachable P }` through reachability exploration and replay; preserve `REACHED`/`UNREACHABLE` reporting and the existing non-failing cover exit policy. Report missing witnesses as inconclusive on incomplete graphs.
-- [ ] Test the distinction between universal eventuality and existential reachability, zero-step reachability, fair/unfair liveness, short safety failures despite later cutoffs, and rejected mixed formulas.
-- [ ] Define compatibility handling for old `invariant`/`cover` keywords and existing profiles. Version artifacts if their representation changes; retain property selection, source spans and tamper detection.
-- [ ] Migrate the current scenario examples, README and public CLI/JSON tests only when parsing, checking, diagnostics and replay support the new surface end to end. Keep older-profile regression fixtures explicit.
+- [x] Existing mailbox reference machine compares every reachable edge, fairness flag, input status and queue identity, plus capacity cutoffs, over small forwarding workloads.
+- [x] Exhaust all **729** three-state/two-message deterministic transition tables, comparing every reachable edge for distinct and identical input payloads.
+- [x] Exhaust **1,024** two-state topology/fairness/predicate combinations across all seven temporal patterns (**7,168** obligation checks).
+- [x] Generated three-state temporal graphs include shared action IDs, intermittent enablement and fair self-edges.
+- [x] Compare temporal outcomes with an independent recurrent-edge-subset oracle; independently validate produced walks, original enabledness fairness, and failed formulas using fixed points.
+- [x] Source/CLI/JSON, color/NO_COLOR, malformed inputs, source/trace mutation, current-format rejection, domain limits, atomic failure and replay regressions.
 
-Touchpoints: `src/syntax.rs` (`ClaimKind`, expressions/parser), `src/model.rs` (typing/temporal validation), `src/checker.rs` (safety/cover classification), `src/temporal.rs`, `src/trace.rs`, and `src/diagnostics.rs`. Current source still supports three claim declaration keywords and rejects `reachable`; this handoff changes documentation only.
+## Remaining validation before calling the core stable
 
-## Hardening and compatibility
+- [ ] Run and review coverage/sanitizer-instrumented fuzz campaigns on source and replay, retaining minimized findings as checked-in tests.
+- [ ] Review coverage gaps and run longer seeded campaigns, especially deeply nested valid source and nearly-valid traces; passing random invalid bytes is not enough.
+- [ ] Independent implementation review against the execution/property contract. Finite oracles and replay agreement are not a proof of correctness.
+- [ ] Establish measured practical state-space limits on larger protocols before introducing optimization claims.
 
-- [x] Preserve the existing `cf-core-v0`, `actors-v0`, and `actors-v1` regression suite and meanings.
-- [x] Keep the old `worker` frontend as compatibility syntax; reject it in v2. No automatic semantics-changing source migration.
-- [x] Reject recursive v2 data until a depth-bound profile exists; bound parser trees (including Pratt left spines), function expansion/depth, runtime evaluation depth, value size and total addresses.
-- [x] Domain validation catches intermediate values in pure helpers, not only committed state.
-- [x] Source and trace fuzz targets build; trace target now validates decoded artifacts against the v2 fixture.
-- [x] Local stable libFuzzer smoke runs: 1,000 source mutations and 1,000 trace mutations with the message fixture/trace as seeds. **No coverage/sanitizer instrumentation was available.**
-- [ ] Coverage-instrumented nightly `cargo fuzz` runs with seeded valid and corrupted v2 source/traces; fix findings before stable release. The current environment has neither `cargo-fuzz` nor a rustup nightly toolchain installed.
+Local tooling status: `cargo-fuzz` is installed. A nightly toolchain download was attempted twice but timed out fetching rustc; **no instrumented local campaign is claimed**. Do not make nightly an application dependency. `.github/workflows/fuzz.yml` adds a separate optional manual/weekly instrumented job with valid source/trace seeds and artifact retention; its remote execution is not implied by adding the workflow.
 
-## Product-adapter gate — not implemented
+## Deferred scope, not generic-core blockers
 
-RFD0002 implementation step 6 remains open. These are **separate profiles**, not additional behaviors inferred from the generic actor syntax:
+- [ ] Imports/namespaces, reusable definitions, explicit finite static instances and check-supplied initialization: separate design, including replay source identity.
+- [ ] Resource/transport libraries or adapters: specify real consistency, scheduling, storage and failure behavior. No Worker/DO/Queue/D1 equivalence is claimed, and no profile switch is planned.
+- [ ] Crashes/restarts, retries/timeouts, dynamic spawn, suspended callbacks, RPC conveniences and shared-memory models: not part of the present execution contract.
+- [ ] Symmetry/partial-order/symbolic reductions: only after soundness design and differential validation.
 
-- [ ] Worker trigger/invocation/response and failure contracts, without inventing persistent Worker identity.
-- [ ] Durable Object routing, volatile versus durable state, storage transactions, suspension/gates, restart/eviction behavior and litmus tests.
-- [ ] Queue producer/consumer, delivery attempts, duplicates, acknowledgment, retry/exhaustion and litmus tests; no generic FIFO or exactly-once substitution.
-- [ ] Explicitly split state commit and publication in adapters where atomic state-plus-send is not justified.
-- [ ] Source/assumption ledger, profile registration and replay compatibility for each adapter.
-
-Fault/retry/restart, synchronous RPC convenience, arbitrary check-supplied initialization configuration and production conformance are not implemented by `actors-v2`. This checklist does not relabel them as generic-core guarantees.
-
-## Reproduce the generic acceptance checks
+## Reproduce
 
 ```sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo run -- check examples/counter-replies.fml --trace-out /tmp/messages.trace.json
-cargo run -- replay examples/counter-replies.fml /tmp/messages.trace.json
+cargo run --locked -- check examples/counter-replies.fml --trace-out /tmp/replies.json
+cargo run --locked -- replay examples/counter-replies.fml /tmp/replies.json
+cargo run --locked -- check examples/missing-reply.fml --trace-out /tmp/missing.json # expected exit 1
+cargo run --locked -- replay examples/missing-reply.fml /tmp/missing.json
 ```
 
-With a nightly toolchain and `cargo-fuzz` installed, use the existing `source` and `trace_json` targets. Seed `fuzz/corpus/source/` from the examples and `fuzz/corpus/trace_json/` from generated format-5 artifacts. Corpus and artifacts are intentionally gitignored; preserve regression findings as small checked-in tests.
+Nightly is needed only for optional instrumented fuzzing; instructions are in the root README. Normal checking, replay, tests, independent oracles, and Clippy use stable.

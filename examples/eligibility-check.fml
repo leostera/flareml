@@ -1,39 +1,17 @@
-// An eligibility policy shared by a login handler: ineligible users are denied.
-// Historical actors-v0 syntax; no database or deployment runtime is assumed.
-type Eligibility = Eligible | Ineligible
-type Request = Request { eligible: Eligibility }
-type Reply = Allowed | Denied
-
-let decision = (eligible: Eligibility): Reply {
-  match eligible {
-    | Eligible -> Allowed
-    | Ineligible -> Denied
-  }
+// Ordinary pure functions model a policy; one participant applies it.
+type Request = Eligible | Ineligible
+type Decision = Allowed | Denied
+let decide = (request: Request): Decision {
+  match request { | Eligible -> Allowed | Ineligible -> Denied }
 }
-
-let login = (request: Request): Reply {
-  decision(request.eligible)
+actor Policy {
+  init(): Decision { Denied }
+  handle_message(state: Decision, request: Request): Decision { decide(request) }
 }
-
-stateless actor API {
-  handle_request = login
-}
-
-invariant "ineligible users cannot log in" {
-  forall (r in requests(API.handle_request)) {
-    r.response == Some(Allowed) implies r.input.eligible == Eligible
-  }
-}
-
-property "accepted requests eventually return" {
-  forall (r in requests(API.handle_request)) { r.accepted leads_to r.completed }
-}
-
-check Login {
-  semantics = "actors-v0"
-  inputs {
-    once API.handle_request(Request { eligible: Eligible })
-    once API.handle_request(Request { eligible: Ineligible })
-  }
+property "an ineligible request is denied" { always (Policy.state == Denied) }
+property "the policy is exercised" { reachable (exists (i in inputs(Policy)) { i.processed }) }
+check Ineligible {
+  mailbox_bound = 1
+  inputs { once send(Policy, Ineligible) }
   fairness { weak runtime.progress }
 }

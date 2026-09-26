@@ -3,11 +3,11 @@ use flareml::{
     diagnostics,
 };
 use std::process::Command;
-const BUG: &str = include_str!("../examples/login-bug.fml");
+const BUG: &str = include_str!("../examples/missing-reply.fml");
 
 #[test]
 fn source_diagnostics_escape_terminal_controls() {
-    let source = "invariant \"x\" { \u{1b}[31m }";
+    let source = "property \"x\" { \u{1b}[31m }";
     let error = flareml::syntax::Error::new(
         flareml::syntax::Span { start: 16, end: 17 },
         "bad \u{1b}[31m token",
@@ -26,7 +26,7 @@ fn colored_and_plain_reports_share_content() {
     for text in [
         "VIOLATED",
         "Counterexample",
-        "responds Allowed",
+        "process Inc",
         "Model assumptions",
     ] {
         assert!(colored.contains(text));
@@ -42,7 +42,7 @@ fn colors_are_controllable_and_never_leak_into_json() {
         (vec!["--color", "always", "--format", "json"], false),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_fml"))
-            .args(["check", "examples/login-bug.fml"])
+            .args(["check", "examples/missing-reply.fml"])
             .args(&flags)
             .output()
             .unwrap();
@@ -60,7 +60,7 @@ fn colors_are_controllable_and_never_leak_into_json() {
 fn no_color_environment_is_respected() {
     let out = Command::new(env!("CARGO_BIN_EXE_fml"))
         .env("NO_COLOR", "1")
-        .args(["check", "examples/login-fixed.fml"])
+        .args(["check", "examples/counter-replies.fml"])
         .output()
         .unwrap();
     assert!(!String::from_utf8_lossy(&out.stdout).contains("\x1b["));
@@ -68,8 +68,8 @@ fn no_color_environment_is_respected() {
 #[test]
 fn user_supplied_control_codes_are_escaped() {
     let src = BUG.replace(
-        "a non-existing user can't log in",
-        "a non-existing user \\u001b[31m",
+        "a waiting client eventually receives its reply",
+        "a waiting client \\u001b[31m",
     );
     let p = flareml::compile(&src, None).unwrap();
     let r = checker::check(&src, &p, &Options::default()).unwrap();

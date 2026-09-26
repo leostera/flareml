@@ -2,7 +2,7 @@
 name = "flareml"
 version = "0.1.0"
 edition = "2024"
-description = "A Cloudflare systems modeling language and native model checker"
+description = "A finite systems modeling language and native model checker"
 
 [[bin]]
 name = "fml"

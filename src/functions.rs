@@ -1,5 +1,4 @@
-//! Actor binding and conservative, transitive function effect inference.
-//! Local function dependencies must be acyclic; actor calls cross scheduler boundaries.
+//! Actor binding and conservative, transitive pure/send/inspection effects.
 use crate::{
     model::{Effects, Program, Ty},
     syntax::*,
@@ -8,39 +7,22 @@ use std::collections::{BTreeMap, BTreeSet};
 
 impl Program {
     pub(crate) fn is_global(&self, name: &str) -> bool {
-        (self.check.semantics == "actors-v2" && ["inputs", "messages"].contains(&name))
-            || self.functions.contains_key(name)
+        self.functions.contains_key(name)
             || self.actors.contains_key(name)
             || self.constructors.contains_key(name)
-            || self
-                .tables
-                .keys()
-                .any(|p| p.split('.').next() == Some(name))
-            || [
-                "call", "send", "requests", "respond", "Some", "None", "Ok", "Err",
-            ]
-            .contains(&name)
+            || ["send", "inputs", "messages", "Some", "None", "Ok", "Err"].contains(&name)
     }
-
     pub(crate) fn bind_actors_and_functions(&mut self) -> Result<()> {
         let mut names: BTreeSet<String> = self.constructors.keys().cloned().collect();
         names.extend(self.model.types.iter().map(|t| t.name.clone()));
         names.extend(
-            self.tables
-                .keys()
-                .filter_map(|p| p.split('.').next().map(str::to_owned)),
-        );
-        names.extend(
             [
-                "call", "send", "requests", "respond", "Some", "None", "Ok", "Err", "Actor",
-                "Address",
+                "send", "inputs", "messages", "Some", "None", "Ok", "Err", "Address", "Option",
+                "Result",
             ]
             .into_iter()
             .map(str::to_owned),
         );
-        if self.check.semantics == "actors-v2" {
-            names.extend(["inputs".into(), "messages".into()]);
-        }
         for f in &self.model.functions {
             if !names.insert(f.name.clone()) {
                 return Err(Error::new(
@@ -61,22 +43,18 @@ impl Program {
         }
         for c in self.constructors.values() {
             for ty in c.payload.iter().chain(c.fields.values()) {
-                self.require_data(ty, Span::default(), &mut BTreeSet::new())?;
+                self.require_data(ty, Span::default())?;
             }
         }
         for f in self.functions.values() {
-            self.require_data(&f.output, f.span, &mut BTreeSet::new())?;
+            self.require_data(&f.output, f.span)?;
             for (_, ty) in &f.params {
-                if ty.name == "Actor" && ty.args.len() == 1 {
-                    self.require_data(&ty.args[0], f.span, &mut BTreeSet::new())?;
-                } else {
-                    self.require_data(ty, f.span, &mut BTreeSet::new())?;
-                }
+                self.require_data(ty, f.span)?;
             }
         }
         for actor in self.actors.values() {
             if let Some((name, ty)) = &actor.key {
-                self.require_data(ty, actor.span, &mut BTreeSet::new())?;
+                self.require_data(ty, actor.span)?;
                 if !matches!(self.resolve(ty, actor.span)?, Ty::Named(_)) {
                     return Err(Error::new(
                         actor.span,
@@ -93,69 +71,40 @@ impl Program {
             let state = actor
                 .state
                 .as_ref()
-                .map(|(ty, _)| self.resolve(ty, actor.span))
+                .map(|ty| self.resolve(ty, actor.span))
                 .transpose()?;
-            if let Some((ty, _)) = &actor.state {
-                self.require_data(ty, actor.span, &mut BTreeSet::new())?;
+            if let Some(ty) = &actor.state {
+                self.require_data(ty, actor.span)?;
             }
-            for (method, function) in &actor.handlers {
-                let f = self.functions.get(function).ok_or_else(|| {
-                    Error::new(actor.span, format!("unknown handler function `{function}`"))
-                })?;
-                let count = if state.is_some() { 2 } else { 1 };
-                if actor.v2
-                    && (method != "handle_message"
-                        || self.resolve(&f.output, f.span)?
-                            != state.clone().unwrap_or(Ty::Named("unit".into())))
-                {
-                    return Err(Error::new(
-                        f.span,
-                        "handle_message must return the actor's state type (or unit for a stateless actor)",
-                    ));
-                }
-                if f.params.len() != count {
-                    return Err(Error::new(
-                        actor.span,
-                        if state.is_some() && actor.v2 {
-                            "stateful handle_message takes (state: State, message: Message)"
-                        } else if state.is_some() {
-                            "stateful handler functions take (owner: Actor<State>, message: Input)"
-                        } else {
-                            "stateless handler functions take exactly one message parameter"
-                        },
-                    ));
-                }
-                if let Some(state) = &state {
-                    let expected = if actor.v2 {
-                        state.clone()
+            let f = &self.functions[&actor.handler];
+            if self.resolve(&f.output, f.span)? != state.clone().unwrap_or(Ty::Named("unit".into()))
+            {
+                return Err(Error::new(
+                    f.span,
+                    "handle_message must return the actor's state type (or unit for a stateless actor)",
+                ));
+            }
+            if f.params.len() != if state.is_some() { 2 } else { 1 } {
+                return Err(Error::new(
+                    f.span,
+                    if state.is_some() {
+                        "stateful handle_message takes (state: State, message: Message)"
                     } else {
-                        Ty::Actor(Box::new(state.clone()))
-                    };
-                    if self.resolve(&f.params[0].1, f.span)? != expected {
-                        return Err(Error::new(
-                            f.span,
-                            "handler state parameter does not match the actor's state type",
-                        ));
-                    }
-                }
-                let input = f.params.last().expect("validated arity").1.clone();
-                self.require_data(&input, f.span, &mut BTreeSet::new())?;
-                let path = format!("{}.{}", actor.name, method);
-                self.handlers.insert(
-                    path.clone(),
-                    Handler {
-                        path,
-                        actor: actor.name.clone(),
-                        function: function.clone(),
-                        input,
-                        output: f.output.clone(),
-                        span: actor.span,
+                        "stateless handle_message takes exactly one message parameter"
                     },
-                );
+                ));
+            }
+            if let Some(state) = &state
+                && self.resolve(&f.params[0].1, f.span)? != *state
+            {
+                return Err(Error::new(
+                    f.span,
+                    "handler state parameter does not match the actor's state type",
+                ));
             }
         }
         self.infer_effects()?;
-        for actor in self.actors.values().filter(|a| a.v2) {
+        for actor in self.actors.values() {
             if let Some(init) = &actor.initializer {
                 let f = &self.functions[init];
                 let key_matches = match (&actor.key, f.params.as_slice()) {
@@ -165,52 +114,42 @@ impl Program {
                     }
                     _ => false,
                 };
-                if !key_matches
-                    || self.effects[init].suspends_or_writes()
-                    || self.effects[init].inspects
-                {
+                if !key_matches || self.effects[init].sends || self.effects[init].inspects {
                     return Err(Error::new(
-                        actor.span,
+                        f.span,
                         "init must be pure and take only the actor identity (or no arguments for a singleton)",
                     ));
                 }
             }
-        }
-        for h in self.handlers.values() {
-            if self.effects[&h.function].inspects {
+            if self.effects[&actor.handler].inspects {
                 return Err(Error::new(
-                    h.span,
+                    actor.span,
                     "specification inspector functions cannot be actor handlers",
                 ));
             }
         }
         Ok(())
     }
-
-    fn require_data(&self, ty: &Type, span: Span, seen: &mut BTreeSet<String>) -> Result<()> {
-        self.require_data_inner(ty, span, seen, &mut BTreeSet::new())
+    fn require_data(&self, ty: &Type, span: Span) -> Result<()> {
+        self.require_data_inner(ty, span, &mut BTreeSet::new(), &mut BTreeSet::new(), 0)
     }
-
     fn require_data_inner(
         &self,
         ty: &Type,
         span: Span,
         seen: &mut BTreeSet<String>,
         done: &mut BTreeSet<String>,
+        depth: usize,
     ) -> Result<()> {
-        if ty.name == "Actor" {
-            return Err(Error::new(
-                span,
-                "Actor<State> is an owned capability, not storable/returnable/message data",
-            ));
-        }
-        if ty.name == "Address" {
-            self.resolve(ty, span)?;
-            return Ok(());
+        if depth > 64 {
+            return Err(Error::new(span, "data type nesting exceeds 64"));
         }
         self.resolve(ty, span)?;
+        if ty.name == "Address" {
+            return Ok(());
+        }
         for arg in &ty.args {
-            self.require_data_inner(arg, span, seen, done)?;
+            self.require_data_inner(arg, span, seen, done, depth + 1)?;
         }
         let Ty::Named(name) = self.resolve(ty, span)? else {
             return Ok(());
@@ -219,27 +158,20 @@ impl Program {
             return Ok(());
         }
         if !seen.insert(name.clone()) {
-            if self.check.semantics == "actors-v2" {
-                return Err(Error::new(
-                    span,
-                    "recursive data requires an explicit depth-bound profile; unsupported in actors-v2",
-                ));
-            }
-            return Ok(());
-        }
-        if seen.len() > 64 {
-            return Err(Error::new(span, "data type nesting exceeds 64"));
+            return Err(Error::new(
+                span,
+                "recursive data is unsupported; use a finite non-recursive representation",
+            ));
         }
         for c in self.constructors.values().filter(|c| c.ty == name) {
             for field in c.payload.iter().chain(c.fields.values()) {
-                self.require_data_inner(field, span, seen, done)?;
+                self.require_data_inner(field, span, seen, done, depth + 1)?;
             }
         }
         seen.remove(&name);
         done.insert(name);
         Ok(())
     }
-
     fn infer_effects(&mut self) -> Result<()> {
         let mut graph = petgraph::graph::DiGraph::<String, ()>::new();
         let nodes: BTreeMap<_, _> = self
@@ -256,47 +188,26 @@ impl Program {
                 cost += 1;
                 if let ExprKind::Field(_, field) = &e.kind
                     && field == "state"
-                    && actor_target(e).is_some_and(|(_, key)| key.is_some())
-                {
-                    fx.inspects = true;
-                }
-                if let Some(path) = e.path()
-                    && (path
-                        .strip_suffix(".rows")
-                        .is_some_and(|p| self.tables.contains_key(p))
-                        || path
-                            .strip_suffix(".state")
-                            .is_some_and(|p| self.actors.contains_key(p)))
+                    && actor_target(e).is_some_and(|(path, _)| {
+                        path.strip_suffix(".state")
+                            .is_some_and(|n| self.actors.contains_key(n))
+                    })
                 {
                     fx.inspects = true;
                 }
                 if matches!(e.kind, ExprKind::Quant { .. }) {
                     fx.inspects = true;
                 }
-                if let ExprKind::Call(target, _args) = &e.kind {
+                if let ExprKind::Call(target, _) = &e.kind {
                     let path = target.path().unwrap_or_default();
                     if self.functions.contains_key(&path) {
                         dependencies.push(path.clone());
                     }
-                    if path == "requests"
-                        || (self.check.semantics == "actors-v2"
-                            && (path == "inputs" || path == "messages"))
-                    {
+                    if path == "inputs" || path == "messages" {
                         fx.inspects = true;
                     }
-                    if path == "call" || path == "send" {
-                        fx.io = true;
-                    }
-                    if let ExprKind::Field(receiver, method) = &target.kind {
-                        if method == "set" {
-                            fx.writes_state = true;
-                        }
-                        if receiver
-                            .path()
-                            .is_some_and(|p| self.tables.contains_key(&p))
-                        {
-                            fx.io = true;
-                        }
+                    if path == "send" {
+                        fx.sends = true;
                     }
                 }
             });
@@ -328,26 +239,25 @@ impl Program {
                     "local function call depth exceeds 64",
                 ));
             }
-            depths.insert(name.clone(), depth);
             if cost > 10_000 {
                 return Err(Error::new(
                     self.functions[name].span,
-                    "expanded function cost exceeds the spike's 10,000-node elaboration limit",
+                    "expanded function cost exceeds 10,000-node elaboration limit",
                 ));
             }
-            if fx.inspects && fx.suspends_or_writes() {
+            if fx.inspects && fx.sends {
                 return Err(Error::new(
                     self.functions[name].span,
-                    "a function cannot mix specification inspection with state or I/O effects",
+                    "a function cannot mix specification inspection with send effects",
                 ));
             }
+            depths.insert(name.clone(), depth);
             costs.insert(name.clone(), cost);
             self.effects.insert(name.clone(), fx);
         }
         Ok(())
     }
 }
-
 fn visit_body(body: &[Stmt], visit: &mut impl FnMut(&Expr)) {
     for s in body {
         match &s.kind {

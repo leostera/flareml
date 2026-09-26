@@ -1,0 +1,42 @@
+name: Instrumented fuzzing (optional)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [source, trace_json]
+    steps:
+      - uses: actions/checkout@v4
+      # Nightly is for libFuzzer coverage/sanitizers ONLY. Normal builds/tests use stable.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: Seed valid source and replay paths
+        run: |
+          mkdir -p fuzz/corpus/source fuzz/corpus/trace_json
+          cp examples/*.fml fuzz/corpus/source/
+          cargo run --locked -- check examples/counter-replies.fml --trace-out fuzz/corpus/trace_json/replies.json
+      - name: Coverage-guided sanitizer run
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=120 -timeout=10 -rss_limit_mb=2048 -seed=12345
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: |
+            fuzz/artifacts/
+            fuzz/corpus/
+          retention-days: 14

@@ -1,222 +1,144 @@
 # FlareML
 
-**Model systems. Explore their possible executions. Find design bugs.**
+**Model systems. Explore their executions. Find design bugs.**
 
-FML is a standalone, Riot-inspired systems modeling language—not an application runtime or deployment language. Its native Rust checker explores a finite state graph, checks invariants at semantic boundaries, and finds temporal counterexamples, including executions that repeat forever.
+FML is a finite systems modeling language with a native Rust model checker—not an application runtime. Actors represent participants: a sequential algorithm, event loop, service, thread, or computer. They do not imply a deployment technology or production conformance.
 
-**Actors are the computational model, not a deployment category.** An actor describes a participant's behavior, identity, message protocol, and optional owned state. That role might be implemented by an Erlang recursive receive loop, a Cloudflare Worker invocation, a containerized service, or a thread with a mailbox. FML models their interactions without choosing that implementation. The semantic profile supplies the actual scheduling, state, and delivery assumptions: using `actor` alone does not establish atomic handlers, durable state, or a runtime's conformance to the model.
-
-**Current status:** the first native vertical slice is implemented: legacy Workers + a primary-only D1 model, all seven temporal patterns below, weak progress fairness, source-mapped reports, and replay. The [`spike/actor-generalization`](docs/rfds/RFD0002-functions-and-actors.md) branch also implements typed functions and addresses, a synchronous experimental `actors-v1` profile, and a separate **experimental asynchronous `actors-v2` slice** with unified actors, FIFO mailboxes and one-way sends. This is **not yet the complete v0 resource set** from [RFD0001](docs/rfds/RFD0001-initial-language-and-model-checker.md) or all of RFD0002. Durable Objects, Queues, KV, buckets, Workflows, restarts, and D1 batches are currently rejected rather than approximated silently.
+There is **one language and one execution contract**: finite identities, per-address FIFO mailboxes, atomic state-and-send turns, optional external inputs, and explicit weak scheduling fairness. There is no `semantics` selector or compatibility runtime.
 
 ## Try it
 
-Requires a current stable Rust toolchain. No Cloudflare account, JVM, or external model-checking process is needed.
+Use **stable Rust**. The CLI uses `clap`; no JVM, cloud account, or external checker is required.
 
 ```sh
-# A counter commits its state and sends an explicit reply:
-cargo run -- check examples/counter-replies.fml --trace-out /tmp/counter-replies.trace.json
-cargo run -- replay examples/counter-replies.fml /tmp/counter-replies.trace.json
-# A missing reply fails even with fair scheduling (expected exit 1):
-cargo run -- check examples/missing-reply.fml --trace-out /tmp/missing-reply.trace.json
-cargo run -- replay examples/missing-reply.fml /tmp/missing-reply.trace.json
-# Resource-specific and earlier-profile examples:
-cargo run -- check examples/login-fixed.fml
-cargo run -- check examples/login-bug.fml --trace-out /tmp/login.trace.json # expected exit 1
-cargo run -- replay examples/login-bug.fml /tmp/login.trace.json
-cargo run -- check examples/isolated-accounts.fml # passes
-cargo run -- check examples/lost-update-across-call.fml # expected exit 1
-```
+cargo run --locked -- check examples/counter-replies.fml --trace-out /tmp/replies.json
+cargo run --locked -- replay examples/counter-replies.fml /tmp/replies.json
 
-See the [scenario guide](examples/README.md) for every example, its semantic profile, and its expected result. Filenames describe the modeled problem, not its implementation mechanism.
+# Intentional bug: a client waits forever for a reply that was never sent (exit 1).
+cargo run --locked -- check examples/missing-reply.fml --trace-out /tmp/missing.json
+cargo run --locked -- replay examples/missing-reply.fml /tmp/missing.json
 
-Buggy examples intentionally exit with code **1**. To install the CLI locally:
-
-```sh
 cargo install --path . --locked
-fml check examples/login-fixed.fml
+fml check --help
 ```
 
-Reports use colors on supported terminals, respect `NO_COLOR`, and remain plain when piped. Override with `--color always` or `--color never`. `--format json` never includes presentation ANSI escapes.
+[All examples](examples/README.md) have tested verdicts and replayable witnesses. Start with the [sequential workflow](examples/sequential-workflow.fml), then compare [lost updates](examples/lost-update.fml) with [atomic increments](examples/atomic-increments.fml).
 
-```text
-  ✗ VIOLATED  Login
-  ────────────────────────────────────────────────────────
-
-  ✗ invariant a non-existing user can't log in
-    Counterexample · 4 steps
-    initial AppDB.User = [User { id: Alice }]
-     1. accept LoginAPI.handle_request(LoginRequest { user_id: Bob }) as request #1
-     2. request #1 issues AppDB.User.get(Bob)
-     3. request #1: AppDB.User.get completes with None
-     4. request #1 responds Allowed
-```
-
-Actual reports also include file/line/column locations, covers, graph statistics, budgets, and the model's assumptions.
-
-## Model shape
-
-The complete [login model](examples/login-fixed.fml) combines typed data and resource declarations:
+## Language shape
 
 ```fml
-type UserId = Alice | Bob
-type LoginRequest = LoginRequest { user_id: UserId }
-type LoginReply = Allowed | Denied
+type Message = Increment
 
-d1 AppDB {
-  table User {
-    id: UserId primary_key
-  }
+actor Counter {
+  init(): Int { 0 }
+  handle_message(state: Int, message: Message): Int { state + 1 }
 }
 
-worker LoginAPI {
-  handle_request(request: LoginRequest): LoginReply {
-    let user = AppDB.User.get(request.user_id);
-    match user {
-      | Some(_) -> respond(Allowed)
-      | None -> respond(Denied)
-    }
-  }
-}
-```
-
-Properties are pure observations—not scripts that perform operations:
-
-```fml
-invariant "a non-existing user can't log in" {
-  forall (r in requests(LoginAPI.handle_request)) {
-    (r.response == Some(Allowed)) implies
-      AppDB.User.rows.contains_key(r.input.user_id)
-  }
+property "one increment stays bounded" { always (Counter.state <= 1) }
+property "the increment is possible" { reachable (Counter.state == 1) }
+property "submitted work finishes" {
+  forall (i in inputs(Counter)) { i.submitted leads_to i.processed }
 }
 
-property "an accepted login eventually responds" {
-  forall (r in requests(LoginAPI.handle_request)) {
-    r.accepted leads_to r.completed
-  }
-}
-```
-
-A `check` chooses initial rows, finite input slots, domains, and scheduling assumptions. Each `once` input can arrive at most once, in any order; input arrival itself is not assumed fair.
-
-```fml
-check Login {
-  semantics = "cf-core-v0"
-  init { AppDB.User = [User { id: Alice }] }
-  inputs {
-    once LoginAPI.handle_request(LoginRequest { user_id: Alice })
-    once LoginAPI.handle_request(LoginRequest { user_id: Bob })
-  }
+check OneIncrement {
+  domain Int = 0..1
+  mailbox_bound = 1
+  inputs { once send(Counter, Increment) }
   fairness { weak runtime.progress }
 }
 ```
 
-`requests(...)` includes the finite input slots before acceptance and after completion. `accepted` means invocation start, not an HTTP acknowledgment. `response` is retained, so the login invariant compares past responses with **current** rows. A model with user deletion would need a different property if it only cares about existence at the authorization decision.
+- A singleton name is its address. `actor Account(id: AccountId)` creates one identity per finite key; use `Account.at(Alice)` and `Address<Account>`.
+- `init` is pure. A stateful handler takes a state value and a message, and returns the next state. Stateless actors omit `init`, take only the message, and return `unit`.
+- `send(address, message)` stages a one-way message. State and all outgoing messages commit together when the handler returns. Receivers can run only in later transitions. Replies require explicit protocol messages and reply addresses.
+- Ordinary `let` functions describe local computation. Their last expression is their result. Exhaustive `match`, records, variants, `Option<T>`, and `Result<T, E>` describe finite data.
+- Properties are read-only. A handler cannot inspect another participant's state or use observation views.
+- `check` describes an experiment, not a `main()` function. `once send(...)` means **at most once**, not guaranteed arrival.
 
-## What is checked
+No suspended calls, threads, storage backends, crashes, retries, timers, imports, or dynamic spawning are built in. Model intervening steps explicitly: a read followed by a write must be two protocol turns if other participants can act between them. Atomic turns are modeling assumptions, not a guarantee made by an HTTP service or real transport.
 
-- **Invariants:** at the initial state and every reachable state, including between resource operations within a handler.
-- **Covers:** whether a predicate can be reached, with a witness when it can.
-- **Temporal properties:** universal claims over infinite behaviors. The native checker uses reachability and fair recurrent components, not long-running simulation.
+## One property declaration
 
-Supported patterns, where `P` and `Q` are state predicates:
+| Form | Meaning | Evidence |
+| --- | --- | --- |
+| `always P` | P holds in every reachable state | A finite bad prefix on failure |
+| `reachable P` | Some finite execution reaches P | A finite reached witness |
+| `eventually P` | Every allowed execution eventually reaches P | A repeating counterexample on failure |
+| `P leads_to Q` | Every P is eventually followed by Q | A repeating counterexample on failure |
+| `P until Q` | P holds until Q; Q must occur | A bad prefix or repeating counterexample |
+| `always eventually P` | P recurs infinitely often | A repeating counterexample |
+| `eventually always P` | P eventually remains true | A repeating counterexample |
+| `always (P implies always Q)` | After P, Q remains true | A finite bad prefix |
 
-| Syntax | Meaning |
-| --- | --- |
-| `always P` | P holds at every state |
-| `eventually P` | P holds now or later |
-| `P leads_to Q` | Every P is followed by Q, possibly immediately |
-| `P until Q` | P holds before the first Q; Q must occur |
-| `always eventually P` | P occurs infinitely often |
-| `eventually always P` | Eventually P stays true |
-| `always (P implies always Q)` | Once P holds, Q holds from then on |
+P and Q are state predicates. Parenthesize compound predicates: `always (A.state == Done implies B.state)`.
 
-Finite `forall` and conjunction can combine temporal clauses. Arbitrary nesting, temporal disjunction/negation, `next`, and strong fairness are rejected. State predicates support Boolean operators, comparisons, finite quantifiers, and typed table/request views.
+Bare predicate properties are rejected. `reachable` is allowed only as the whole property body, over a state predicate. `exists` quantifies finite **data**, not executions. Temporal conjunction and stable `forall` are supported; arbitrary temporal nesting, temporal disjunction/negation, `next`, and strong fairness are not.
 
-Without fairness, stuttering forever is a permitted behavior. `weak runtime.progress` excludes indefinite postponement of a particular continuously enabled continuation or operation completion. It does not make a false result true or guarantee environment inputs arrive.
+Safety is checked at initialization and as states are discovered, before graph closure. Reachability is `REACHED` or, only after complete exploration, `UNREACHABLE`. An unreachable query does not itself produce a failing exit code. Remaining temporal analysis requires a closed graph.
 
-A liveness failure includes a **lasso**: a finite prefix followed by a loop that can repeat forever. Replay re-executes every action, checks snapshots and loop closure, checks fairness, and independently evaluates the failed temporal formula on that trace.
+Without fairness, stuttering forever is allowed. `weak runtime.progress` prevents indefinite postponement of a continuously enabled mailbox. It does **not** force external submissions. Safety and reachability do not prune executions using fairness.
 
-## Scope and limits
+## Observing work
+
+`inputs(A)` ranges over A's declared external slots across all keys. Each has `payload`, `target`, `submitted`, and `processed` fields. The flags are monotone; processing means its own handler committed, **not** that a reply arrived.
+
+`messages(A)` includes generated messages through `message_bound = N` stable lifetime slots per actor declaration, across keys. Fields are `sent`, `processed`, `external`, `payload: Option<Message>`, and `target: Option<Address<A>>`. Unsent slots have false flags and `None` data. Identical sends get different slots; slots never recycle.
+
+The distinction between bounds matters:
+- `mailbox_bound`: maximum **pending messages per address**, required.
+- `message_bound`: maximum **lifetime observed sends per actor declaration**, optional.
+
+Exhaustion is inconclusive, not message loss or blocked sending. Omit lifetime history when checking infinite finite-state message cycles; with it, an unbounded sending protocol eventually exhausts the pool. Unused slots are reported separately from an empty temporal quantifier.
+
+## Results, limits, and replay
 
 ```sh
-fml check model.fml --check Login --property "an accepted login eventually responds"
+fml check model.fml --check Scenario --property "submitted work finishes"
 fml check model.fml --max-states 100000 --max-depth 1000 --timeout 30s
-fml check model.fml --format json --trace-out /tmp/counterexample.json
+fml check model.fml --format json --trace-out /tmp/witness.json
+fml replay model.fml /tmp/witness.json
 ```
-
-The defaults are 100,000 states, depth 1,000, and 30 seconds. These are **search budgets**, not definitions of `eventually`. Exceeding a budget yields an inconclusive result, never success. The report's `complete` field means the reachable **system graph** was completely explored; individual claim outcomes also account for temporal analysis cutoffs.
-
-Closed variants provide finite domains. Stored `Int` and `String` values require explicit pools in the selected check:
-
-```fml
-domain Int = 0..3
-domain String = ["alice", "bob"]
-```
-
-Ranges are inclusive; aliases share the underlying pool. Escaping a pool is inconclusive, not integer wrapping or a discarded transition. A successful check proves only the selected finite model under the printed assumptions—not all workloads or conformance of production code.
 
 | Exit | Meaning |
 | --- | --- |
-| 0 | Selected claims verified in scope; covers have separate reached/unreachable outcomes |
-| 1 | A design-property counterexample was found |
-| 2 | Invalid/unsupported model or check configuration |
-| 3 | Inconclusive exploration or domain cutoff |
+| 0 | Selected requirements verified in scope; reachability queries have separate outcomes |
+| 1 | A requirement is violated, with evidence |
+| 2 | Invalid or unsupported model/configuration |
+| 3 | Inconclusive: a domain, capacity, evaluation, or exploration limit was reached |
 | 4 | Tool, I/O, or replay validation error |
 
-### Experimental asynchronous actors (`actors-v2`, spike branch)
+Closed variants are finite. `Int` and `String` data need explicit literal pools (`domain Int = 0..3`, `domain String = ["a", "b"]`). Crossing a bound never proves a property: values are not wrapped, transitions are not silently dropped, and full verification requires complete exploration.
 
-The [message-response fixture](examples/counter-replies.fml) uses one `actor` declaration form, a pure `init(id): State`, `handle_message(state: State, message: Message): State`, and typed `send(address, message)`. Actors without `init` have a one-argument message handler returning `unit`. `once send(Actor.at(key), message)` is an optional external submission; only enabled mailbox-head processing is subject to `weak runtime.progress`. A handler runs to completion in one atomic transition: it returns the next owned state and publishes its staged outgoing sends together, in source order. Each typed actor address has a finite FIFO mailbox; `mailbox_bound = N` is required, and exceeding it is **INCONCLUSIVE**, never a silently dropped message. There is no implicit reply: pass a typed reply address and a correlation ID in the message. The fixture has replayable covers, a safety invariant, conditional reply liveness, and a format-version-5 trace.
+Replay re-executes actions, compares snapshots and provenance, checks source identity, loop closure and fairness, and independently interprets the property on the trace. Only the current artifact format (**6**) is accepted; regenerate traces after source or format changes. Versioning artifacts does not select runtime behavior.
 
-`inputs(Actor)` exposes stable external slots with typed `payload`/`target` and `submitted`/`processed` flags. `messages(Actor)` observes external **and generated** sends through a finite lifetime pool selected with `message_bound = N` (per actor declaration, across keys). Slots exist for temporal binding before messages are sent; they expose `sent`, `processed`, `external`, and optional `payload`/`target`. Slots are never reused, and exhausting the pool is inconclusive. Omit this bound when checking infinite finite-state message cycles without lifetime history. Input completion does not imply reply completion. `requests(...)` is still an older-profile inspector, not an alias for either view.
+Reports support automatic color, `--color always|never|auto`, and `NO_COLOR`. JSON never contains presentation ANSI escapes. The full syntax, precedence, assumptions, limits, and deferred features are in [RFD0002](docs/rfds/RFD0002-functions-and-actors.md).
 
-This is a **fault-free, in-memory modeling profile**, not Cloudflare Queue/DO semantics: it has no crashes, retries, durability, I/O within callbacks, timeout, or live suspension. The independent FIFO scheduler oracle, fairness tests, and effect/capability hardening now cover the generic core. The [RFD0002 acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) keeps product adapters and coverage-instrumented fuzzing explicitly unfinished; passing generic models do not establish those contracts. V2 format-4 artifacts must be regenerated; older profiles keep format 3.
-
-### Earlier synchronous actor profile (`actors-v1`, spike branch)
-
-The following describes only the older `actors-v1` spike; it is **not** silently reinterpreted as the mailbox model in `actors-v2`.
-
-Typed `let` functions bind to `stateless actor Name { method = function }` or `stateful actor Name(id: Key) { state: State = initial; method = function }`. State is modeled per finite key; `Name.at(key).state` inspects it only in specifications. Singleton stateful actors omit `(id: Key)`. Keyed input slots use `once Name.at(key).method(message)`. `Address<Name>` is typed, serializable model data produced by `Name.at(key)`, unlike the scoped `Actor<State>` owner capability; see [the address-routing example](examples/routed-deposits.fml). An effectful handler may directly bind `let reply = call(Name.at(key).method, message)` or `call(address.method, message)` (or `call(Name.method, message)` for a singleton/stateless actor). The caller suspends; the callee is independently accepted/scheduled; its committed state and reply precede caller resumption. Internal accept, resume, completion, and reply steps participate in `weak runtime.progress`; external input acceptance remains optional. `requests(Name.method)` ranges over **external** input slots only, not dynamically created calls. [The account-isolation example](examples/isolated-accounts.fml) shows isolated accounts and [the lost-update example](examples/lost-update-across-call.fml) shows a same-key lost update across an actor call.
-
-This version assumes fault-free calls and retained modeled state, **not** durable storage, exactly-once queue delivery, timeouts, eviction, crash recovery, or a Cloudflare backend. Recursive actor calls are not mistaken for local recursion; their finite expansion hits an **inconclusive** frame limit rather than being pruned. Trace artifacts now use format version 3; earlier formats are rejected. `actors-v0` and the legacy `cf-core-v0` remain separate regression profiles; `worker` is still a transitional compatibility syntax. The unresolved design/adapter contracts are in [RFD0002](docs/rfds/RFD0002-functions-and-actors.md).
-
-### Implemented resource semantics
-
-Workers have concurrent invocation frames with no persistent Worker state. Resource calls split into issue and completion steps; a handler is not implicitly atomic.
-
-D1 supports a typed table DSL, non-optional primary keys, single-column unique constraints, `Option<T>` fields, and key-based `get`, `insert`, `update`, and `delete`. A rejected mutation leaves rows unchanged. Multiple NULL/`None` entries are permitted for a nullable unique column. Reads and individual mutations are atomic at completion, but a read followed by an update is **not** a transaction—see [lost-update.fml](examples/lost-update.fml).
-
-The current model excludes replicas, transport failures, crashes, unknown commit outcomes, and interactive transactions. Mutation `Result`s must be bound and immediately matched with `Ok` and `Err` arms. This intentionally restrictive rule prevents accidentally discarded errors while broader control-flow analysis is deferred.
-
-## Implementation
-
-The application-specific code is the language grammar, type/effect rules, semantic interpreter, temporal fragment, and witness logic. Reusable infrastructure comes from crates.io:
-
-- `logos`: lexer generation
-- `petgraph`: strongly connected components
-- `clap` + `humantime`: CLI and duration parsing
-- `serde` + `serde_json`: structured reports and replay artifacts
-- `miette`: source diagnostics
-- `owo-colors` + `supports-color`: terminal presentation
-- `sha2`: source identity in replay artifacts
-- `proptest` + `tempfile`: generative tests and isolated CLI tests
-
-The checker uses BFS, exact state equality, deterministic edge ordering, and SCC-based liveness checks. It retains all edge labels, including fair self-edges. Symmetry, partial-order reduction, symbolic checking, and approximate visited sets are not enabled.
-
-## Development
+## Development and correctness
 
 ```sh
 cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 ```
 
-Tests exercise the source-to-CLI pipeline, mutation boundaries, fairness, temporal boundaries, cutoff behavior, invalid programs, colors, and corrupt replay artifacts. A separate exponential oracle enumerates recurrent edge subsets of tiny graphs and cross-checks the native temporal algorithms; trace validation uses fixed-point temporal evaluation rather than SCC analysis.
+`rust-toolchain.toml` and normal CI use **stable**. Tests cover source-to-CLI behavior, atomicity, type/effect rejection, finite bounds, fair/unfair progress, missing replies, and trace corruption. Independent oracles compare:
+- all two-state graph/predicate/fairness combinations for seven temporal patterns;
+- generated three-state graphs with shared action identities;
+- FIFO scheduler transitions and cutoffs;
+- all 729 three-state/two-message deterministic transition tables.
 
-Optional fuzzing uses `cargo-fuzz` and a nightly toolchain:
+These improve confidence; they are not a proof of checker correctness. Search uses exact state equality without symmetry, partial-order, or symbolic reduction.
+
+**Nightly is optional and only for coverage/sanitizer-instrumented fuzzing:**
 
 ```sh
-cargo +nightly fuzz run source
-cargo +nightly fuzz run trace_json
+cargo install cargo-fuzz --locked
+rustup toolchain install nightly --profile minimal
+mkdir -p fuzz/corpus/source fuzz/corpus/trace_json
+cp examples/*.fml fuzz/corpus/source/
+cargo run --locked -- check examples/counter-replies.fml --trace-out fuzz/corpus/trace_json/replies.json
+cargo +nightly fuzz run source -- -max_total_time=120
+cargo +nightly fuzz run trace_json -- -max_total_time=120
 ```
 
-See [RFD0001](docs/rfds/RFD0001-initial-language-and-model-checker.md) for the full design and remaining vertical additions. In particular, the Queue/DO slice and D1 batches are still required before declaring the planned v0 complete.
+A separate optional scheduled/manual workflow runs these campaigns and saves artifacts. See the [acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) for completed work and remaining validation.

@@ -1,71 +1,59 @@
-use flareml::{
-    checker::{self, Options, Status},
-    compile,
-};
+use flareml::compile;
 use proptest::prelude::*;
-const FIXED: &str = include_str!("../examples/login-fixed.fml");
+const FIXED: &str = include_str!("../examples/counter-replies.fml");
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(128))]
+    #![proptest_config(ProptestConfig::with_cases(256))]
     #[test]
-    fn arbitrary_source_does_not_panic(source in ".{0,1000}") { let _=compile(&source,None); }
+    fn arbitrary_source_does_not_panic(source in ".{0,2000}") { let _ = compile(&source, None); }
     #[test]
-    fn arbitrary_trace_json_does_not_panic(source in ".{0,1000}") { let _=serde_json::from_str::<flareml::trace::Trace>(&source); }
-}
-#[test]
-fn missing_result_handling_is_rejected() {
-    let src=FIXED.replace("let user = AppDB.User.get(request.user_id);","let ignored = AppDB.User.insert(User { id: request.user_id });\nlet user = AppDB.User.get(request.user_id);");
-    assert!(
-        compile(&src, None)
-            .unwrap_err()
-            .message
-            .contains("Result binding")
-    );
-}
-#[test]
-fn nested_matches_hit_parser_guard() {
-    let mut body = "respond(())".to_owned();
-    for _ in 0..150 {
-        body = format!("match request {{ | _ -> {body} }}");
+    fn arbitrary_trace_json_does_not_panic(source in ".{0,2000}") { let _ = serde_json::from_str::<flareml::trace::Trace>(&source); }
+    #[test]
+    fn mutated_valid_source_does_not_panic(index in 0usize..4096, insertion in ".{0,32}") {
+        let mut source = FIXED.to_owned();
+        let i = index % source.len(); // fixture is ASCII
+        source.insert_str(i, &insertion);
+        let _ = compile(&source, None);
     }
-    let src = format!(
-        "worker API {{ go(request: Bool) {{ {body} }} }} invariant \"ok\" {{ true }} check C {{ semantics = \"cf-core-v0\" }}"
-    );
-    assert!(compile(&src, None).unwrap_err().message.contains("nesting"));
 }
 #[test]
-fn nullable_unique_fields_match_sqlite_null_behavior() {
-    let src = r#"
-type Id = A | B
-d1 DB { table User { id: Id primary_key email: Option<String> unique } }
-invariant "valid" { true }
-check C { semantics = "cf-core-v0" domain String = ["shared"] init { DB.User = [User { id: A, email: None }, User { id: B, email: None }] } }
-"#;
-    let p = compile(src, None).unwrap();
-    assert_eq!(
-        checker::check(src, &p, &Options::default()).unwrap().status,
-        Status::VerifiedInScope
+fn nested_matches_and_expressions_hit_parser_guard() {
+    let mut body = "()".to_owned();
+    for _ in 0..150 {
+        body = format!("match msg {{ | _ -> {body} }}");
+    }
+    let source = format!(
+        "actor API {{ handle_message(msg: Bool): unit {{ {body} }} }} property \"ok\" {{ always true }} check C {{ mailbox_bound = 1 }}"
     );
-    let invalid = src.replace("email: None", "email: Some(\"shared\")");
-    let p = compile(&invalid, None).unwrap();
     assert!(
-        checker::check(&invalid, &p, &Options::default())
+        compile(&source, None)
             .unwrap_err()
             .message
-            .contains("initial constraint")
+            .contains("nesting")
+    );
+    let source = format!(
+        "property \"deep\" {{ always {}true{} }} check C {{ mailbox_bound = 1 }}",
+        "(".repeat(150),
+        ")".repeat(150)
+    );
+    assert!(
+        compile(&source, None)
+            .unwrap_err()
+            .message
+            .contains("nesting")
     );
 }
 #[test]
-fn duplicate_check_and_claim_names_are_rejected() {
+fn duplicate_check_and_property_names_are_rejected() {
     assert!(
         compile(
-            &format!("{FIXED}\ncheck Login {{ semantics = \"cf-core-v0\" }}"),
-            Some("Login")
+            &format!("{FIXED}\ncheck OneIncrement {{ mailbox_bound = 1 }}"),
+            Some("OneIncrement")
         )
         .is_err()
     );
     assert!(
         compile(
-            &format!("{FIXED}\ninvariant \"a non-existing user can't log in\" {{ true }}"),
+            &format!("{FIXED}\nproperty \"client receives reply\" {{ always true }}"),
             None
         )
         .is_err()
@@ -73,13 +61,42 @@ fn duplicate_check_and_claim_names_are_rejected() {
 }
 #[test]
 fn model_types_cannot_be_cyclic_aliases() {
-    let src = format!("type X = Y\ntype Y = X\n{FIXED}");
-    assert!(compile(&src, None).unwrap_err().message.contains("cyclic"));
+    assert!(
+        compile(&format!("type X = Y\ntype Y = X\n{FIXED}"), None)
+            .unwrap_err()
+            .message
+            .contains("cyclic")
+    );
 }
 #[test]
-fn keyword_singleton_constructor_is_not_an_alias_cycle() {
-    let src = "type Tick = Tick invariant \"all ticks\" { forall (t in Tick) { t == Tick } } check C { semantics = \"cf-core-v0\" }";
-    // Same-named constructors and type-domain references are currently ambiguous: reject
-    // the collection use rather than claiming a vacuous check.
-    assert!(compile(src, None).is_err());
+fn same_named_constructor_is_not_silently_an_empty_type_domain() {
+    let source = "type Tick = Tick property \"ticks\" { always (forall (t in Tick) { t == Tick }) } check C { mailbox_bound = 1 }";
+    let p = compile(source, None).unwrap();
+    let report = flareml::checker::check(source, &p, &Default::default()).unwrap();
+    assert_eq!(report.status, flareml::checker::Status::VerifiedInScope);
+    assert_eq!(p.domain("Tick", 0).unwrap().len(), 1);
+}
+#[test]
+fn domains_cannot_recursively_execute_helpers_or_be_empty() {
+    for domain in ["[]", "[id(0)]", "[0 + 1]"] {
+        let source = format!(
+            "let id = (x: Int): Int {{ x }} property \"ok\" {{ always true }} check C {{ mailbox_bound = 1 domain Int = {domain} }}"
+        );
+        assert!(compile(&source, None).is_err());
+    }
+}
+#[test]
+fn trace_unknown_fields_are_rejected_at_each_boundary() {
+    let p = compile(FIXED, None).unwrap();
+    let r = flareml::checker::check(FIXED, &p, &Default::default()).unwrap();
+    let trace = serde_json::to_value(r.witness().unwrap()).unwrap();
+    for path in [0, 1, 2] {
+        let mut bad = trace.clone();
+        match path {
+            0 => bad["semantics"] = "actors-v1".into(),
+            1 => bad["states"][0]["frames"] = serde_json::json!([]),
+            _ => bad["actions"][0]["unknown"] = true.into(),
+        }
+        assert!(serde_json::from_value::<flareml::trace::Trace>(bad).is_err());
+    }
 }

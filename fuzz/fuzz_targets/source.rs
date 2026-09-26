@@ -11,6 +11,11 @@ fuzz_target!(|source: &str| {
             timeout: std::time::Duration::from_millis(5),
             property: None,
         };
-        let _ = flareml::checker::check(source, &program, &options);
+        if let Err(error) = flareml::checker::check(source, &program, &options) {
+            assert!(
+                !error.message.starts_with("internal:") && !error.message.starts_with("invalid trace:"),
+                "accepted source caused a checker failure: {error}"
+            );
+        }
     }
 });

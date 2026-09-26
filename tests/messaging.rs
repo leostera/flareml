@@ -18,7 +18,7 @@ fn asynchronous_reply_is_a_separate_turn_after_commit() {
     assert_eq!(report.status, Status::VerifiedInScope);
     assert!(report.assumptions.iter().any(|a| a.contains("not durable")));
     let trace = report.witness().unwrap();
-    assert_eq!(trace.format_version, 5);
+    assert_eq!(trace.format_version, 6);
     assert_eq!(trace.actions.len(), 3);
     assert!(!trace.actions[0].fair); // environment is optional
     assert!(trace.actions[1].description.contains("enqueue 1 message"));
@@ -79,10 +79,9 @@ actor Target {
     }
   }
 }
-invariant "second cannot overtake first" { Target.state != 2 }
-cover "second processed after first" { Target.state == 3 }
+property "second cannot overtake first" { always (Target.state != 2) }
+property "second processed after first" { reachable (Target.state == 3) }
 check C {
-  semantics = "actors-v2"
   domain Int = 0..3
   mailbox_bound = 2
   inputs { once send(Sender, Start) }
@@ -113,10 +112,9 @@ actor B {
   init(): Bool { false }
   handle_message(state: Bool, msg: Tick): Bool { true }
 }
-invariant "both values are Booleans" { A.state || !A.state }
-cover "both have processed" { A.state && B.state }
+property "both values are Booleans" { always (A.state || !A.state) }
+property "both have processed" { reachable (A.state && B.state) }
 check C {
-  semantics = "actors-v2"
   mailbox_bound = 1
   inputs { once send(A, Tick) once send(B, Tick) }
   fairness { weak runtime.progress }
@@ -153,9 +151,8 @@ actor Loop {
     }
   }
 }
-cover "loop runs" { Loop.state }
+property "loop runs" { reachable Loop.state }
 check C {
-  semantics = "actors-v2"
   mailbox_bound = 1
   inputs { once send(Loop, Tick) }
   fairness { weak runtime.progress }
@@ -179,7 +176,7 @@ check C {
         1
     );
     let waiting = source.replace(
-        "cover \"loop runs\" { Loop.state }",
+        "property \"loop runs\" { reachable Loop.state }",
         "property \"optional input can starve\" { eventually Loop.state }",
     );
     let p = compile(&waiting, None).unwrap();
@@ -199,9 +196,8 @@ type Key = Left | Right
 actor Shard(id: Key) {
   handle_message(message: Tick): unit { () }
 }
-invariant "typed inputs are finite" { true }
+property "typed inputs are finite" { always true }
 check C {
-  semantics = "actors-v2"
   mailbox_bound = 1
   inputs { once send(Shard.at(Left), Tick) once send(Shard.at(Right), Tick) }
   fairness { weak runtime.progress }
@@ -229,9 +225,8 @@ actor Later {
   init(): Bool { false }
   handle_message(state: Bool, msg: Tick): Bool { true }
 }
-cover "later receives" { Later.state }
+property "later receives" { reachable Later.state }
 check C {
-  semantics = "actors-v2"
   mailbox_bound = 1
   inputs { once send(Earlier, Tick) }
   fairness { weak runtime.progress }
@@ -267,9 +262,12 @@ fn transitive_send_helper_is_staged_and_init_cannot_send() {
 }
 
 #[test]
-fn profile_and_message_type_fail_closed() {
+fn unsupported_effects_and_message_types_fail_closed() {
     for source in [
-        REPLY.replace("actors-v2", "actors-v1"),
+        REPLY.replace(
+            "mailbox_bound = 2",
+            "semantics = \"actors-v1\" mailbox_bound = 2",
+        ),
         REPLY.replace("Inc(Client.at(User), First)", "Counted(First, 1)"),
         REPLY.replace(
             "send(reply_to, Counted(request_id, next))",

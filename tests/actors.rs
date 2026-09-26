@@ -1,323 +1,172 @@
 use flareml::{
     checker::{self, Options, Status},
     compile,
+    semantics::Value,
 };
-const STATELESS: &str = include_str!("../examples/eligibility-check.fml");
-const STATEFUL: &str = include_str!("../examples/counter-bound.fml");
-const CALL: &str = include_str!("../examples/forwarded-counter.fml");
-const KEYED: &str = include_str!("../examples/isolated-accounts.fml");
-const INTERLEAVING: &str = include_str!("../examples/lost-update-across-call.fml");
-const ADDRESS: &str = include_str!("../examples/routed-deposits.fml");
+const ROUTED: &str = include_str!("../examples/routed-deposits.fml");
+const POLICY: &str = include_str!("../examples/eligibility-check.fml");
 fn run(source: &str) -> checker::Report {
     let p = compile(source, None).unwrap();
-    checker::check(source, &p, &Options::default()).unwrap()
+    let r = checker::check(source, &p, &Options::default()).unwrap();
+    for c in &r.claims {
+        if let Some(t) = &c.witness {
+            t.validate(source, &p).unwrap();
+        }
+    }
+    r
 }
 #[test]
-fn pure_functions_compose_with_stateless_actors_and_temporal_claims() {
-    let report = run(STATELESS);
-    assert_eq!(report.status, Status::VerifiedInScope);
-    assert_eq!(report.states, 9);
+fn pure_functions_compose_with_actors() {
+    assert_eq!(run(POLICY).status, Status::VerifiedInScope);
 }
 #[test]
-fn stateful_actor_counterexample_replays() {
-    let p = compile(STATEFUL, None).unwrap();
-    let report = run(STATEFUL);
-    assert_eq!(report.status, Status::Violated);
-    let witness = report.witness().unwrap();
-    assert_eq!(
-        witness.states.last().unwrap().actors["Counter"],
-        flareml::semantics::Value::Int(2)
-    );
-    witness.validate(STATEFUL, &p).unwrap();
+fn policy_bug_has_a_short_witness() {
+    let source = POLICY.replace("| Ineligible -> Denied", "| Ineligible -> Allowed");
+    let r = run(&source);
+    assert_eq!(r.status, Status::Violated);
+    assert_eq!(r.witness().unwrap().actions.len(), 2);
 }
 #[test]
-fn one_input_preserves_state_safety() {
-    let source = STATEFUL.replace(
-        "    once Counter.add(1)\n    once Counter.add(1)",
-        "    once Counter.add(1)",
-    );
-    assert_eq!(run(&source).status, Status::VerifiedInScope);
-}
-#[test]
-fn stateful_capability_must_match_and_cannot_be_returned() {
-    let bad = STATEFUL.replace("owner: Actor<Int>", "owner: Actor<Reply>");
+fn finite_keyed_state_and_typed_routes_are_isolated() {
+    let p = compile(ROUTED, None).unwrap();
+    let initial = p.initial().unwrap();
+    assert_eq!(initial.keyed_actors["Account"].len(), 2);
     assert!(
-        compile(&bad, None)
-            .unwrap_err()
-            .message
-            .contains("does not match")
+        initial.keyed_actors["Account"]
+            .values()
+            .all(|v| *v == Value::Int(0))
     );
-    let bad = STATEFUL.replace(
-        "let increment = (owner: Actor<Int>, amount: Int): Reply",
-        "let increment = (owner: Actor<Int>, amount: Int): Actor<Int>",
-    );
-    assert!(compile(&bad, None).is_err());
+    assert_eq!(run(ROUTED).status, Status::VerifiedInScope);
 }
 #[test]
-fn owner_capabilities_cannot_escape_through_nested_data_types() {
-    for declaration in [
-        "type Leak = Leak(Actor<Int>)",
-        "type Leak = Leak { owner: Option<Actor<Int>> }",
-        "type Envelope = Envelope { owner: Actor<Int> }\ntype Leak = Leak(Envelope)",
+fn misrouting_is_not_hidden_by_equal_message_payloads() {
+    let source = ROUTED.replace(
+        "target: Account.at(Bob), amount: 1",
+        "target: Account.at(Alice), amount: 1",
+    );
+    let r = run(&source);
+    assert_eq!(r.status, Status::Violated);
+    let final_state = r.witness().unwrap().states.last().unwrap();
+    assert_eq!(
+        final_state.keyed_actors["Account"][&Value::Variant("Alice".into(), vec![])],
+        Value::Int(2)
+    );
+    assert_eq!(
+        final_state.keyed_actors["Account"][&Value::Variant("Bob".into(), vec![])],
+        Value::Int(0)
+    );
+}
+#[test]
+fn address_types_cannot_be_forged_or_used_as_state_capabilities() {
+    for source in [
+        ROUTED.replace("target: Account.at(Alice)", "target: Account.at(1)"),
+        ROUTED.replace("target: Address<Account>", "target: Address<Router>"),
+        ROUTED.replace(
+            "send(message.target, Deposit(message.amount))",
+            "message.target.set(1)",
+        ),
+        ROUTED.replace(
+            "send(message.target, Deposit(message.amount))",
+            "message.target.state",
+        ),
+        ROUTED.replace("amount: 1", "amount: true"),
     ] {
-        let source = STATEFUL.replace(
-            "type Reply = Count(Int)",
-            &format!("type Reply = Count(Int)\n{declaration}"),
-        );
-        assert!(
-            compile(&source, None)
-                .unwrap_err()
-                .message
-                .contains("owned capability")
-        );
+        assert!(compile(&source, None).is_err(), "{source}");
     }
 }
 #[test]
-fn recursive_pure_calls_are_rejected() {
-    let source = STATELESS.replace("decision(request.eligible)", "login(request)");
+fn recursive_local_helpers_are_rejected_but_message_cycles_are_not_recursion() {
+    let source = POLICY.replace("| Eligible -> Allowed", "| Eligible -> decide(request)");
     assert!(
         compile(&source, None)
             .unwrap_err()
             .message
             .contains("recursive")
     );
+    let cycle = "type Msg = Tick actor A { handle_message(msg: Msg): unit { send(A, msg) } } property \"progress\" { forall (i in inputs(A)) { i.submitted leads_to i.processed } } check C { mailbox_bound = 1 inputs { once send(A, Tick) } fairness { weak runtime.progress } }";
+    assert_eq!(run(cycle).status, Status::VerifiedInScope);
 }
 #[test]
-fn inspector_function_cannot_be_bound_as_handler() {
-    let source = STATELESS.replace(
-        "let login = (request: Request): Reply {\n  decision(request.eligible)",
-        "let login = (request: Request): Reply {\n  requests(API.handle_request)",
-    );
-    assert!(compile(&source, None).is_err());
-}
-#[test]
-fn actor_call_requires_v1_profile() {
-    let source = STATELESS.replace(
-        "decision(request.eligible)",
-        "call(API.handle_request, request)",
-    );
-    assert!(
-        compile(&source, None)
-            .unwrap_err()
-            .message
-            .contains("actors-v1")
-    );
-}
-#[test]
-fn actor_calls_suspend_resume_and_replay() {
-    let p = compile(CALL, None).unwrap();
-    let report = run(CALL);
-    assert_eq!(report.status, Status::Violated);
-    let witness = report.witness().unwrap();
-    assert!(
-        witness
-            .actions
-            .iter()
-            .any(|a| a.description.contains("calls Counter.add"))
-    );
-    assert!(
-        witness
-            .actions
-            .iter()
-            .any(|a| a.description.contains("accept Counter.add"))
-    );
-    witness.validate(CALL, &p).unwrap();
-    assert_eq!(witness.format_version, 3);
-    let mut previous = witness.clone();
-    previous.format_version = 2;
-    assert!(
-        previous
-            .validate(CALL, &p)
-            .unwrap_err()
-            .message
-            .contains("unsupported format")
-    );
-}
-#[test]
-fn actor_call_returns_under_weak_fairness() {
-    let source = CALL.replace("once API.add(1) once API.add(1)", "once API.add(1)");
+fn aliases_and_string_identity_domains_are_transparent() {
+    let source = ROUTED
+        .replace("type AccountId = Alice | Bob", "type AccountId = String")
+        .replace(".at(Alice)", ".at(\"alice\")")
+        .replace(".at(Bob)", ".at(\"bob\")")
+        .replace(
+            "domain Int = 0..2",
+            "domain Int = 0..2 domain String = [\"alice\", \"bob\"]",
+        );
     assert_eq!(run(&source).status, Status::VerifiedInScope);
 }
 #[test]
-fn actor_call_is_typed_and_profile_gated() {
-    let source = CALL.replace("call(Counter.add, amount)", "call(Counter.add, Count(1))");
-    assert!(
-        compile(&source, None)
-            .unwrap_err()
-            .message
-            .contains("type mismatch")
-    );
-    let source = CALL.replace("actors-v1", "actors-v0");
-    assert!(
-        compile(&source, None)
-            .unwrap_err()
-            .message
-            .contains("actors-v1")
-    );
+fn old_language_constructs_are_not_compatibility_modes() {
+    for source in [
+        "worker A { go(x: Bool): Bool { respond(x) } }",
+        "stateless actor A { go = f }",
+        "stateful actor A { state: Bool = false go = f }",
+        "d1 DB { table Item { id: Bool primary_key } }",
+    ] {
+        assert!(
+            compile(
+                &format!(
+                    "{source} property \"p\" {{ always true }} check C {{ mailbox_bound = 1 }}"
+                ),
+                None
+            )
+            .is_err()
+        );
+    }
+    for call in [
+        "call(Policy.handle_message, request)",
+        "respond(Denied)",
+        "requests(Policy.handle_message)",
+    ] {
+        assert!(
+            compile(
+                &POLICY.replace("decide(request) }", &format!("{call} }}")),
+                None
+            )
+            .is_err()
+        );
+    }
 }
 #[test]
-fn keyed_instances_are_isolated_and_replayable() {
-    let p = compile(KEYED, None).unwrap();
-    let report = run(KEYED);
-    assert_eq!(report.status, Status::VerifiedInScope);
-    let initial = p.initial().unwrap();
-    assert_eq!(initial.keyed_actors["Account"].len(), 2);
-    assert!(
-        initial.keyed_actors["Account"]
-            .values()
-            .all(|v| *v == flareml::semantics::Value::Int(0))
-    );
-    let source = KEYED.replace(
-        "once API.deposit(Alice) once API.deposit(Bob)",
-        "once API.deposit(Alice) once API.deposit(Alice)",
-    );
-    let p = compile(&source, None).unwrap();
-    let report = run(&source);
-    assert_eq!(report.status, Status::Violated);
-    let witness = report.witness().unwrap();
-    assert!(
-        witness
-            .actions
-            .iter()
-            .any(|a| a.description.contains("Account.at(Alice).deposit"))
-    );
-    witness.validate(&source, &p).unwrap();
-    let encoded = serde_json::to_string(witness).unwrap();
-    let decoded: flareml::trace::Trace = serde_json::from_str(&encoded).unwrap();
-    decoded.validate(&source, &p).unwrap();
-    let last = witness.states.last().unwrap();
-    use flareml::semantics::Value;
+fn lost_update_and_atomic_repair_have_different_verdicts() {
+    let r = run(include_str!("../examples/lost-update.fml"));
+    assert_eq!(r.status, Status::Violated);
     assert_eq!(
-        last.keyed_actors["Account"][&Value::Variant("Alice".into(), vec![])],
-        Value::Int(2)
+        r.witness().unwrap().states.last().unwrap().actors["Store"],
+        Value::Int(1)
     );
     assert_eq!(
-        last.keyed_actors["Account"][&Value::Variant("Bob".into(), vec![])],
-        Value::Int(0)
+        run(include_str!("../examples/atomic-increments.fml")).status,
+        Status::VerifiedInScope
     );
 }
 #[test]
-fn keyed_identity_is_typed_and_profile_gated() {
-    assert!(
-        compile(&KEYED.replace("Account.at(id)", "Account.at(1)"), None)
-            .unwrap_err()
-            .message
-            .contains("type mismatch")
-    );
-    assert!(
-        compile(&KEYED.replace("actors-v1", "actors-v0"), None)
-            .unwrap_err()
-            .message
-            .contains("actors-v1")
-    );
-    assert!(
-        compile(
-            &KEYED.replace(
-                "call(Account.at(id).deposit, 1)",
-                "call(Account.deposit, 1)"
-            ),
-            None
-        )
-        .unwrap_err()
-        .message
-        .contains("keyed call")
-    );
+fn lost_updates_can_violate_safety_even_when_each_client_finishes() {
+    let source = include_str!("../examples/lost-update.fml");
+    let p = compile(source, None).unwrap();
+    let r = checker::check(
+        source,
+        &p,
+        &Options {
+            property: Some("submitted clients finish".into()),
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(r.status, Status::VerifiedInScope);
 }
+
 #[test]
-fn keyed_direct_input_is_a_distinct_identity() {
-    let source = KEYED.replace(
-        "once API.deposit(Alice) once API.deposit(Bob)",
-        "once Account.at(Alice).deposit(1)",
-    );
-    let p = compile(&source, None).unwrap();
-    let report = run(&source);
-    assert_eq!(report.status, Status::VerifiedInScope);
+fn singleton_sequential_workflow_is_a_finite_model() {
+    let source = include_str!("../examples/sequential-workflow.fml");
+    let r = run(source);
+    assert_eq!(r.status, Status::VerifiedInScope);
+    assert!(r.states < 10);
     assert_eq!(
-        p.initial().unwrap().frames[0].key,
-        Some(flareml::semantics::Value::Variant("Alice".into(), vec![]))
-    );
-    let bad = source.replace("Account.at(Alice).deposit(1)", "Account.deposit(1)");
-    assert!(
-        compile(&bad, None)
-            .unwrap_err()
-            .message
-            .contains("keyed actor input")
-    );
-}
-#[test]
-fn cyclic_actor_calls_are_bounded_not_mistaken_for_local_recursion() {
-    let source = CALL
-        .replace("call(Counter.add, amount)", "call(API.add, amount)")
-        .replace("once API.add(1) once API.add(1)", "once API.add(1)");
-    let p = compile(&source, None).unwrap();
-    let report = checker::check(&source, &p, &Options::default()).unwrap();
-    assert_eq!(report.status, Status::Inconclusive);
-    assert!(
-        report
-            .cutoff
-            .as_deref()
-            .unwrap_or_default()
-            .contains("actor call")
-    );
-}
-#[test]
-fn same_key_interleaves_while_calling_another_actor() {
-    let p = compile(INTERLEAVING, None).unwrap();
-    let report = run(INTERLEAVING);
-    assert_eq!(report.status, Status::Violated);
-    let witness = report.witness().unwrap();
-    witness.validate(INTERLEAVING, &p).unwrap();
-    assert_eq!(
-        witness.states.last().unwrap().keyed_actors["Counter"]
-            [&flareml::semantics::Value::Variant("Shared".into(), vec![])],
-        flareml::semantics::Value::Int(1)
-    );
-}
-#[test]
-fn typed_addresses_can_cross_messages_and_route_calls() {
-    let p = compile(ADDRESS, None).unwrap();
-    let report = run(ADDRESS);
-    assert_eq!(report.status, Status::VerifiedInScope);
-    let input = &p.initial().unwrap().frames[0].input;
-    assert!(matches!(input, flareml::semantics::Value::Record(_, fields)
-        if matches!(fields.get("target"), Some(flareml::semantics::Value::Address(_, _)))));
-    let bad = ADDRESS.replace("Account.at(Bob), amount: 1", "Account.at(Alice), amount: 1");
-    let p = compile(&bad, None).unwrap();
-    let report = run(&bad);
-    assert_eq!(report.status, Status::Violated);
-    report.witness().unwrap().validate(&bad, &p).unwrap();
-}
-#[test]
-fn addresses_are_not_owner_capabilities() {
-    let bad = ADDRESS.replace("target: Address<Account>", "target: Actor<Int>");
-    assert!(
-        compile(&bad, None)
-            .unwrap_err()
-            .message
-            .contains("owned capability")
-    );
-    let bad = ADDRESS.replace("target: Account.at(Alice)", "target: Account.at(1)");
-    assert!(
-        compile(&bad, None)
-            .unwrap_err()
-            .message
-            .contains("type mismatch")
-    );
-    let bad = ADDRESS.replace("input.target.deposit", "input.target.unknown");
-    assert!(
-        compile(&bad, None)
-            .unwrap_err()
-            .message
-            .contains("known actor handler")
-    );
-}
-#[test]
-fn actor_models_do_not_claim_legacy_profile() {
-    let source = STATELESS.replace("actors-v0", "cf-core-v0");
-    assert!(
-        compile(&source, None)
-            .unwrap_err()
-            .message
-            .contains("require")
+        run(&source.replace("fairness { weak runtime.progress }", "")).status,
+        Status::Violated
     );
 }

@@ -47,13 +47,13 @@ fn dynamically_generated_messages_are_not_an_empty_initial_quantifier() {
 const TWINS: &str = r#"
 type Msg = Ping
 actor Sink { handle_message(msg: Msg): unit { () } }
-invariant "inputs processed only after submission" {
-  forall (i in inputs(Sink)) { i.processed implies i.submitted }
+property "inputs processed only after submission" {
+  always (forall (i in inputs(Sink)) { i.processed implies i.submitted })
 }
-invariant "observations are typed" {
-  forall (m in messages(Sink)) {
+property "observations are typed" {
+  always (forall (m in messages(Sink)) {
     m.sent implies m.payload == Some(Ping) && m.target == Some(Sink) && m.external
-  }
+  })
 }
 property "every external input progresses" {
   forall (i in inputs(Sink)) { i.submitted leads_to i.processed }
@@ -61,11 +61,10 @@ property "every external input progresses" {
 property "every envelope progresses" {
   forall (m in messages(Sink)) { m.sent leads_to m.processed }
 }
-cover "two sends of equal payload are distinct" {
-  forall (m in messages(Sink)) { m.sent && m.processed }
+property "two sends of equal payload are distinct" {
+  reachable (forall (m in messages(Sink)) { m.sent && m.processed })
 }
 check C {
-  semantics = "actors-v2"
   mailbox_bound = 2
   message_bound = 2
   inputs { once send(Sink, Ping) once send(Sink, Ping) }
@@ -110,10 +109,10 @@ actor Sink {
   handle_message(state: Msg, msg: Msg): Msg { msg }
 }
 property "generated work completes" { forall (m in messages(Sink)) { m.sent leads_to m.processed } }
-cover "A then B" { Sink.state == Second && forall (m in messages(Sink)) { m.processed } }
-cover "B then A" { Sink.state == First && forall (m in messages(Sink)) { m.processed } }
+property "A then B" { reachable (Sink.state == Second && forall (m in messages(Sink)) { m.processed }) }
+property "B then A" { reachable (Sink.state == First && forall (m in messages(Sink)) { m.processed }) }
 check C {
-  semantics = "actors-v2" mailbox_bound = 2 message_bound = 2
+  mailbox_bound = 2 message_bound = 2
   inputs { once send(A, Start) once send(B, Start) }
   fairness { weak runtime.progress }
 }
@@ -151,7 +150,6 @@ type Msg = Ping
 actor Loop { handle_message(msg: Msg): unit { send(Loop, msg) } }
 property "all sends finish" { forall (m in messages(Loop)) { m.sent leads_to m.processed } }
 check C {
-  semantics = "actors-v2"
   mailbox_bound = 1
   message_bound = 3
   inputs { once send(Loop, Ping) }
@@ -267,7 +265,7 @@ actor Busy { handle_message(msg: Msg): unit { send(Busy, msg) } }
 actor Victim { handle_message(msg: Msg): unit { () } }
 property "victim progresses" { forall (i in inputs(Victim)) { i.submitted leads_to i.processed } }
 check C {
-  semantics = "actors-v2" mailbox_bound = 1
+  mailbox_bound = 1
   inputs { once send(Busy, Ping) once send(Victim, Ping) }
   fairness { weak runtime.progress }
 }
@@ -306,7 +304,7 @@ actor Client {
 }
 property "missing reply" { Client.state leads_to !Client.state }
 check C {
-  semantics = "actors-v2" mailbox_bound = 1
+  mailbox_bound = 1
   inputs { once send(Client, Start) }
   fairness { weak runtime.progress }
 }

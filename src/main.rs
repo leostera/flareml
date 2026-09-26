@@ -58,10 +58,14 @@ impl Color {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Explore a finite model and check its selected properties.
     Check {
+        /// Model source (.fml).
         model: PathBuf,
+        /// Select a named check when the source declares more than one.
         #[arg(long = "check")]
         selected: Option<String>,
+        /// Check only this named property (including reachability queries).
         #[arg(long)]
         property: Option<String>,
         #[arg(long, default_value_t = 100_000)]
@@ -72,9 +76,11 @@ enum Command {
         timeout: Duration,
         #[arg(long, value_enum, default_value = "text")]
         format: Format,
+        /// Save a counterexample, or a reached witness if no violation was found.
         #[arg(long)]
         trace_out: Option<PathBuf>,
     },
+    /// Re-execute a current-format trace and validate its evidence.
     Replay {
         model: PathBuf,
         trace: PathBuf,

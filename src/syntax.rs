@@ -64,7 +64,7 @@ impl Expr {
     pub fn temporal(&self) -> bool {
         match &self.kind {
             ExprKind::Unary(op, x) => {
-                ["always", "eventually"].contains(&op.as_str()) || x.temporal()
+                ["always", "eventually", "reachable"].contains(&op.as_str()) || x.temporal()
             }
             ExprKind::Binary(op, a, b) => {
                 ["leads_to", "until"].contains(&op.as_str()) || a.temporal() || b.temporal()
@@ -78,7 +78,7 @@ impl Expr {
         }
     }
 }
-/// A handler selector, optionally through a keyed actor address.
+/// Recognize a static actor path, optionally through a keyed address.
 pub fn actor_target(e: &Expr) -> Option<(String, Option<Expr>)> {
     if let Some(path) = e.path() {
         return Some((path, None));
@@ -129,19 +129,6 @@ pub struct TypeDecl {
     pub span: Span,
 }
 #[derive(Clone, Debug)]
-pub struct Field {
-    pub ty: Type,
-    pub primary: bool,
-    pub unique: bool,
-}
-#[derive(Clone, Debug)]
-pub struct Table {
-    pub path: String,
-    pub name: String,
-    pub fields: BTreeMap<String, Field>,
-    pub span: Span,
-}
-#[derive(Clone, Debug)]
 pub enum Pattern {
     Wild,
     Bind(String),
@@ -172,20 +159,9 @@ pub struct Actor {
     /// A finite, typed identity domain; absent for singleton actors.
     pub key: Option<(String, Type)>,
     /// Owned state is retained between invocations; this does not imply durability.
-    pub state: Option<(Type, Expr)>,
-    pub handlers: BTreeMap<String, String>,
-    /// Only the asynchronous profile uses inline handlers and a pure initializer.
-    pub v2: bool,
+    pub state: Option<Type>,
+    pub handler: String,
     pub initializer: Option<String>,
-    pub span: Span,
-}
-#[derive(Clone, Debug)]
-pub struct Handler {
-    pub path: String,
-    pub actor: String,
-    pub function: String,
-    pub input: Type,
-    pub output: Type,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,17 +179,14 @@ pub struct Claim {
 }
 #[derive(Clone, Debug)]
 pub struct Input {
-    pub handler: String,
+    pub actor: String,
     pub key: Option<Expr>,
     pub value: Expr,
-    pub via_send: bool,
     pub span: Span,
 }
 #[derive(Clone, Debug)]
 pub struct Check {
     pub name: String,
-    pub semantics: String,
-    pub init: BTreeMap<String, Vec<Expr>>,
     pub inputs: Vec<Input>,
     pub domains: BTreeMap<String, Vec<Expr>>,
     pub fair: bool,
@@ -225,7 +198,6 @@ pub struct Check {
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub types: Vec<TypeDecl>,
-    pub tables: Vec<Table>,
     pub functions: Vec<Function>,
     pub actors: Vec<Actor>,
     pub claims: Vec<Claim>,
@@ -291,7 +263,6 @@ struct Parser {
     tokens: Vec<Token>,
     i: usize,
     depth: usize,
-    legacy_worker: bool,
 }
 impl Parser {
     fn token(&self) -> &Token {
@@ -327,6 +298,29 @@ impl Parser {
     }
     fn name(&mut self) -> Result<String> {
         let t = self.token();
+        if [
+            "type",
+            "actor",
+            "let",
+            "match",
+            "property",
+            "check",
+            "forall",
+            "exists",
+            "true",
+            "false",
+            "always",
+            "eventually",
+            "reachable",
+            "leads_to",
+            "until",
+            "implies",
+            "not",
+        ]
+        .contains(&t.text.as_str())
+        {
+            return self.err("reserved keyword cannot be used as an identifier");
+        }
         if !t.string
             && t.text
                 .as_bytes()
@@ -413,7 +407,7 @@ impl Parser {
                     }
                     ExprKind::List(xs)
                 }
-                "!" | "not" | "-" | "always" | "eventually" => {
+                "!" | "not" | "-" | "always" | "eventually" | "reachable" => {
                     ExprKind::Unary(t.text, Box::new(self.expr(8)?))
                 }
                 "forall" | "exists" => {
@@ -613,16 +607,7 @@ impl Parser {
             }
             StmtKind::Match(e, arms)
         } else {
-            let mut value = self.expr(0)?;
-            // Compatibility only: the core AST has functions/actors, not workers/respond.
-            if self.legacy_worker
-                && let ExprKind::Call(target, args) = &value.kind
-                && target.path().as_deref() == Some("respond")
-                && args.len() == 1
-            {
-                value.kind = args[0].kind.clone();
-            }
-            StmtKind::Expr(value)
+            StmtKind::Expr(self.expr(0)?)
         };
         self.depth -= 1;
         Ok(Stmt { kind, span })
@@ -677,43 +662,6 @@ impl Parser {
                     variants,
                     span,
                 });
-            } else if self.eat("d1") {
-                let db = self.name()?;
-                self.expect("{")?;
-                while !self.eat("}") {
-                    self.expect("table")?;
-                    let name = self.name()?;
-                    self.expect("{")?;
-                    let mut fields = BTreeMap::new();
-                    while !self.eat("}") {
-                        let f = self.name()?;
-                        self.expect(":")?;
-                        let ty = self.ty()?;
-                        let primary = self.eat("primary_key");
-                        let unique = self.eat("unique");
-                        if fields
-                            .insert(
-                                f,
-                                Field {
-                                    ty,
-                                    primary,
-                                    unique,
-                                },
-                            )
-                            .is_some()
-                        {
-                            return self.err("duplicate table field");
-                        }
-                        self.eat(",");
-                        self.eat(";");
-                    }
-                    m.tables.push(Table {
-                        path: format!("{db}.{name}"),
-                        name,
-                        fields,
-                        span,
-                    });
-                }
             } else if self.eat("let") {
                 let name = self.name()?;
                 self.expect("=")?;
@@ -741,59 +689,6 @@ impl Parser {
                     body,
                     span,
                 });
-            } else if self.at("stateless") || self.at("stateful") {
-                let stateful = self.take().text == "stateful";
-                self.expect("actor")?;
-                let name = self.name()?;
-                let key = if self.eat("(") {
-                    let param = self.name()?;
-                    self.expect(":")?;
-                    let ty = self.ty()?;
-                    self.expect(")")?;
-                    if !stateful {
-                        return self.err("only stateful actors can have keyed identity");
-                    }
-                    Some((param, ty))
-                } else {
-                    None
-                };
-                self.expect("{")?;
-                let mut state = None;
-                let mut handlers = BTreeMap::new();
-                while !self.eat("}") {
-                    if self.eat("state") {
-                        if !stateful || state.is_some() {
-                            return self.err("only a stateful actor can declare one state field");
-                        }
-                        self.expect(":")?;
-                        let ty = self.ty()?;
-                        self.expect("=")?;
-                        state = Some((ty, self.expr(0)?));
-                    } else {
-                        let method = self.name()?;
-                        self.expect("=")?;
-                        let function = self.name()?;
-                        if handlers.insert(method, function).is_some() {
-                            return self.err("duplicate actor handler binding");
-                        }
-                    }
-                    self.eat(";");
-                }
-                if stateful && state.is_none() {
-                    return self.err("stateful actor requires `state: Type = initial_value`");
-                }
-                if handlers.is_empty() {
-                    return self.err("actor requires at least one function binding");
-                }
-                m.actors.push(Actor {
-                    name,
-                    key,
-                    state,
-                    handlers,
-                    v2: false,
-                    initializer: None,
-                    span,
-                });
             } else if self.eat("actor") {
                 let name = self.name()?;
                 let key = if self.eat("(") {
@@ -812,7 +707,7 @@ impl Parser {
                     let method_span = self.token().span;
                     let method = self.name()?;
                     if method != "init" && method != "handle_message" {
-                        return self.err("actors-v2 supports only init and handle_message");
+                        return self.err("actor supports only init and handle_message");
                     }
                     self.expect("(")?;
                     let mut params = vec![];
@@ -847,85 +742,24 @@ impl Parser {
                 }
                 let handler =
                     handler.ok_or_else(|| Error::new(span, "actor requires handle_message"))?;
-                // The legacy Actor AST carries an initial expression alongside its
-                // state type. In v2 the real initializer is the inline function;
-                // the unit expression is never evaluated by the v2 interpreter.
                 let state = initializer.as_ref().map(|f| {
-                    let output = m
-                        .functions
+                    m.functions
                         .iter()
                         .find(|x| &x.name == f)
                         .expect("parsed init")
                         .output
-                        .clone();
-                    (
-                        output,
-                        Expr {
-                            kind: ExprKind::Unit,
-                            span,
-                        },
-                    )
+                        .clone()
                 });
                 m.actors.push(Actor {
                     name,
                     key,
                     state,
-                    handlers: BTreeMap::from([("handle_message".into(), handler)]),
-                    v2: true,
+                    handler,
                     initializer,
                     span,
                 });
-            } else if self.eat("worker") {
-                // Transitional frontend shim so the checkpoint's regression corpus still runs.
-                let name = self.name()?;
-                self.expect("{")?;
-                let mut bindings = BTreeMap::new();
-                while !self.eat("}") {
-                    let method = self.name()?;
-                    self.expect("(")?;
-                    let param = self.name()?;
-                    self.expect(":")?;
-                    let input = self.ty()?;
-                    self.expect(")")?;
-                    let output = if self.eat(":") {
-                        self.ty()?
-                    } else {
-                        Type::named("unit")
-                    };
-                    self.legacy_worker = true;
-                    let body = self.block()?;
-                    self.legacy_worker = false;
-                    let function = format!("$legacy.{name}.{method}");
-                    if bindings.insert(method, function.clone()).is_some() {
-                        return self.err("duplicate legacy handler");
-                    }
-                    m.functions.push(Function {
-                        name: function,
-                        params: vec![(param, input)],
-                        output,
-                        body,
-                        span,
-                    });
-                }
-                m.actors.push(Actor {
-                    name,
-                    key: None,
-                    state: None,
-                    handlers: bindings,
-                    v2: false,
-                    initializer: None,
-                    span,
-                });
-            } else if ["invariant", "property", "cover"]
-                .iter()
-                .any(|s| self.at(s))
-            {
-                let keyword = self.take().text;
-                let kind = match keyword.as_str() {
-                    "invariant" => ClaimKind::Invariant,
-                    "property" => ClaimKind::Property,
-                    _ => ClaimKind::Cover,
-                };
+            } else if self.eat("property") {
+                let kind = ClaimKind::Property;
                 let name = self.string()?;
                 self.expect("{")?;
                 let body = self.expr(0)?;
@@ -941,8 +775,6 @@ impl Parser {
                 self.expect("{")?;
                 let mut c = Check {
                     name,
-                    semantics: String::new(),
-                    init: BTreeMap::new(),
                     inputs: vec![],
                     domains: BTreeMap::new(),
                     fair: false,
@@ -987,24 +819,6 @@ impl Parser {
                         return self.err("duplicate check section");
                     }
                     match section.as_str() {
-                        "semantics" => {
-                            self.expect("=")?;
-                            c.semantics = self.string()?;
-                        }
-                        "init" => {
-                            self.expect("{")?;
-                            while !self.eat("}") {
-                                let p = self.path()?;
-                                self.expect("=")?;
-                                let e = self.expr(0)?;
-                                let ExprKind::List(xs) = e.kind else {
-                                    return self.err("table initializer must be a row list");
-                                };
-                                if c.init.insert(p, xs).is_some() {
-                                    return self.err("duplicate table initializer");
-                                }
-                            }
-                        }
                         "inputs" => {
                             self.expect("{")?;
                             while !self.eat("}") {
@@ -1012,12 +826,12 @@ impl Parser {
                                 let span = self.token().span;
                                 let request = self.expr(0)?;
                                 let ExprKind::Call(target, mut args) = request.kind else {
-                                    return self.err(
-                                        "input requires a handler call or send(address, message)",
-                                    );
+                                    return self.err("input requires once send(address, message)");
                                 };
-                                let via_send = target.path().as_deref() == Some("send");
-                                let (handler, key, value) = if via_send {
+                                if target.path().as_deref() != Some("send") {
+                                    return self.err("input requires once send(address, message)");
+                                }
+                                let (actor, key, value) = {
                                     if args.len() != 2 {
                                         return self
                                             .err("send input requires an address and one message");
@@ -1045,19 +859,12 @@ impl Parser {
                                                 .err("send input requires a static actor address");
                                         }
                                     };
-                                    (format!("{name}.handle_message"), key, args.remove(0))
-                                } else {
-                                    if args.len() != 1 {
-                                        return self.err("input requires exactly one message");
-                                    }
-                                    let (handler, key) = actor_target(&target).ok_or_else(|| Error::new(span, "input requires Actor.method or Actor.at(key).method"))?;
-                                    (handler, key, args.remove(0))
+                                    (name, key, args.remove(0))
                                 };
                                 c.inputs.push(Input {
-                                    handler,
+                                    actor,
                                     key,
                                     value,
-                                    via_send,
                                     span,
                                 });
                             }
@@ -1111,7 +918,6 @@ pub fn parse(source: &str) -> Result<Model> {
         tokens: lex(source)?,
         i: 0,
         depth: 0,
-        legacy_worker: false,
     }
     .model()
 }

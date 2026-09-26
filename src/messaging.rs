@@ -1,8 +1,8 @@
-//! Finite asynchronous actor turns for the explicitly versioned actors-v2 profile.
+//! One execution contract: finite FIFO mailboxes and atomic state/outbox turns.
 use crate::{
     model::Program,
-    semantics::{Action, Env, State, Step, Value, bind_pattern},
-    syntax::{Error, Expr, ExprKind, Result, Span, Stmt, StmtKind},
+    semantics::{Action, Env, State, Step, Value},
+    syntax::{Error, Result, Span},
 };
 
 impl Program {
@@ -35,8 +35,7 @@ impl Program {
                 }
             }
         }
-        // All typed addresses exist before any initializer runs. Initialization
-        // cannot depend on declaration order or on an uninitialized actor state.
+        // All addresses exist before any pure initializer, independent of source order.
         for actor in self.actors.values() {
             if let Some(init) = &actor.initializer {
                 let f = &self.functions[init];
@@ -55,7 +54,7 @@ impl Program {
                     if actor.key.is_some() {
                         env.insert(f.params[0].0.clone(), key.clone());
                     }
-                    let state = self.eval_function_body(&f.body, &mut env, &s)?;
+                    let state = self.eval_body(&f.body, &mut env, &s, None)?;
                     self.check_value(&state, f.span)?;
                     if actor.key.is_some() {
                         s.keyed_actors
@@ -75,7 +74,7 @@ impl Program {
                 .map(|k| self.eval(k, &Env::new(), &s))
                 .transpose()?
                 .unwrap_or(Value::Unit);
-            let actor = self.handlers[&input.handler].actor.clone();
+            let actor = input.actor.clone();
             if !s
                 .mailboxes
                 .contains_key(&Value::Address(actor, Box::new(key)))
@@ -85,14 +84,12 @@ impl Program {
                     "LIMIT: input target outside finite identity domain",
                 ));
             }
-            let message = self.eval(&input.value, &Env::new(), &s)?;
-            self.check_value(&message, input.span)?;
+            self.check_value(&self.eval(&input.value, &Env::new(), &s)?, input.span)?;
             s.input_submitted.push(false);
             s.input_processed.push(false);
         }
         Ok(s)
     }
-
     pub(crate) fn message_successors(&self, s: &State) -> Result<Vec<Step>> {
         let mut steps = vec![Step {
             action: Action {
@@ -113,8 +110,7 @@ impl Program {
                 .map(|k| self.eval(k, &Env::new(), s))
                 .transpose()?
                 .unwrap_or(Value::Unit);
-            let address =
-                Value::Address(self.handlers[&input.handler].actor.clone(), Box::new(key));
+            let address = Value::Address(input.actor.clone(), Box::new(key));
             let message = self.eval(&input.value, &Env::new(), s)?;
             let mut next = s.clone();
             self.enqueue_message(
@@ -144,8 +140,7 @@ impl Program {
                 return Err(Error::new(Span::default(), "internal: invalid mailbox key"));
             };
             let actor = &self.actors[actor_name];
-            let h = &self.handlers[&format!("{actor_name}.handle_message")];
-            let function = &self.functions[&h.function];
+            let function = &self.functions[&actor.handler];
             let mut args = vec![];
             if actor.state.is_some() {
                 args.push(if actor.key.is_some() {
@@ -162,8 +157,9 @@ impl Program {
                 .map(|((name, _), value)| (name.clone(), value))
                 .collect();
             let mut outbox = vec![];
-            let next_state = self.eval_message_body(&function.body, &mut env, s, &mut outbox)?;
+            let next_state = self.eval_body(&function.body, &mut env, s, Some(&mut outbox))?;
             self.check_value(&next_state, function.span)?;
+            // Work on a clone: a cutoff never partly mutates the source state.
             let mut next = s.clone();
             next.mailboxes
                 .get_mut(address)
@@ -195,98 +191,11 @@ impl Program {
                 action: Action {
                     id: format!("process:{}", serde_json::to_string(address).expect("serializable address")),
                     description: format!("process {message} at {address}; commit {next_state}; enqueue {count} message(s) [{}]", sends.join(", ")),
-                    span: function.span,
-                    fair: self.check.fair,
+                    span: function.span, fair: self.check.fair,
                 },
                 state: next,
             });
         }
         Ok(steps)
-    }
-
-    fn eval_message_body(
-        &self,
-        body: &[Stmt],
-        env: &mut Env,
-        s: &State,
-        outbox: &mut Vec<(Value, Value, Span)>,
-    ) -> Result<Value> {
-        let _guard = crate::evaluation::EvaluationGuard::enter(
-            body.first().map_or(Span::default(), |s| s.span),
-        )?;
-        let mut result = Value::Unit;
-        for statement in body {
-            result = match &statement.kind {
-                StmtKind::Let(name, expr) => {
-                    let value = self.eval_message_expr(expr, env, s, outbox)?;
-                    env.insert(name.clone(), value);
-                    Value::Unit
-                }
-                StmtKind::Expr(expr) => self.eval_message_expr(expr, env, s, outbox)?,
-                StmtKind::Match(expr, arms) => {
-                    let value = self.eval(expr, env, s)?;
-                    self.check_value(&value, expr.span)?;
-                    let mut chosen = None;
-                    for (pattern, branch) in arms {
-                        let mut locals = env.clone();
-                        if bind_pattern(pattern, &value, &mut locals) {
-                            chosen =
-                                Some(self.eval_message_body(branch, &mut locals, s, outbox)?);
-                            break;
-                        }
-                    }
-                    chosen.ok_or_else(|| {
-                        Error::new(statement.span, "internal: non-exhaustive message match")
-                    })?
-                }
-            };
-        }
-        Ok(result)
-    }
-
-    fn eval_message_expr(
-        &self,
-        expr: &Expr,
-        env: &Env,
-        s: &State,
-        outbox: &mut Vec<(Value, Value, Span)>,
-    ) -> Result<Value> {
-        if let ExprKind::Call(target, args) = &expr.kind {
-            let path = target.path().unwrap_or_default();
-            if path == "send" {
-                let address = self.eval(&args[0], env, s)?;
-                let message = self.eval(&args[1], env, s)?;
-                self.check_value(&message, expr.span)?;
-                if !s.mailboxes.contains_key(&address) {
-                    return Err(Error::new(
-                        expr.span,
-                        "LIMIT: send target outside finite identity domain",
-                    ));
-                }
-                outbox.push((address, message, expr.span));
-                return Ok(Value::Unit);
-            }
-            if let Some(f) = self.functions.get(&path)
-                && self.effects[&path].suspends_or_writes()
-            {
-                let values = args
-                    .iter()
-                    .map(|e| self.eval(e, env, s))
-                    .collect::<Result<Vec<_>>>()?;
-                for value in &values {
-                    self.check_value(value, expr.span)?;
-                }
-                let mut locals: Env = f
-                    .params
-                    .iter()
-                    .zip(values)
-                    .map(|((name, _), value)| (name.clone(), value))
-                    .collect();
-                return self.eval_message_body(&f.body, &mut locals, s, outbox);
-            }
-        }
-        let value = self.eval(expr, env, s)?;
-        self.check_value(&value, expr.span)?;
-        Ok(value)
     }
 }

@@ -1,5 +1,6 @@
 //! FlareML's native model-checking pipeline.
 pub mod checker;
+mod claims;
 pub mod diagnostics;
 mod evaluation;
 mod functions;

@@ -1,52 +1,49 @@
-// Two requests can read the same value before either write commits.
-type CounterId = Shared
-type Reply = Done | Rejected
+// Two clients perform read-modify-write against a storage service.
+// Every service turn is atomic; the multi-message transaction is not.
+// This is an abstract storage protocol, not a D1 adapter.
+type ClientId = Alice | Bob
+type Phase = Idle | Reading | Writing | Done
+type ClientState = ClientState { me: Address<Client>, phase: Phase }
+type ClientMessage = Start | ReadValue(Int) | Ack
+type StoreMessage = Read(Address<Client>) | Write(Address<Client>, Int)
 
-d1 AppDB {
-  table Counter {
-    id: CounterId primary_key
-    value: Int
-  }
-}
-
-worker CounterAPI {
-  increment(request: CounterId): Reply {
-    let row = AppDB.Counter.get(request);
-    match row {
-      | None -> respond(Rejected)
-      | Some(counter) -> {
-        let updated = AppDB.Counter.update(request, Counter {
-          id: request,
-          value: counter.value + 1
-        });
-        match updated {
-          | Ok(_) -> respond(Done)
-          | Err(_) -> respond(Rejected)
+actor Client(id: ClientId) {
+  init(id: ClientId): ClientState { ClientState { me: Client.at(id), phase: Idle } }
+  handle_message(state: ClientState, message: ClientMessage): ClientState {
+    match message {
+      | Start -> {
+          send(Store, Read(state.me))
+          ClientState { me: state.me, phase: Reading }
         }
-      }
+      | ReadValue(value) -> {
+          send(Store, Write(state.me, value + 1))
+          ClientState { me: state.me, phase: Writing }
+        }
+      | Ack -> ClientState { me: state.me, phase: Done }
     }
   }
 }
-
-invariant "two successful increments are not lost" {
-  (forall (r in requests(CounterAPI.increment)) {
-    r.response == Some(Done)
-  }) implies (forall (row in AppDB.Counter.rows) { row.value == 2 })
-}
-
-property "accepted increments eventually respond" {
-  forall (r in requests(CounterAPI.increment)) {
-    r.accepted leads_to r.completed
+actor Store {
+  init(): Int { 0 }
+  handle_message(state: Int, message: StoreMessage): Int {
+    match message {
+      | Read(reply_to) -> { send(reply_to, ReadValue(state)) state }
+      | Write(reply_to, value) -> { send(reply_to, Ack) value }
+    }
   }
 }
-
-check Concurrent {
-  semantics = "cf-core-v0"
+property "two completed increments retain both updates" {
+  always ((Client.at(Alice).state.phase == Done && Client.at(Bob).state.phase == Done) implies Store.state == 2)
+}
+property "submitted clients finish" {
+  forall (id in ClientId) {
+    (exists (i in inputs(Client)) { i.target == Client.at(id) && i.submitted })
+      leads_to Client.at(id).state.phase == Done
+  }
+}
+check LostUpdate {
   domain Int = 0..2
-  init { AppDB.Counter = [Counter { id: Shared, value: 0 }] }
-  inputs {
-    once CounterAPI.increment(Shared)
-    once CounterAPI.increment(Shared)
-  }
+  mailbox_bound = 2
+  inputs { once send(Client.at(Alice), Start) once send(Client.at(Bob), Start) }
   fairness { weak runtime.progress }
 }

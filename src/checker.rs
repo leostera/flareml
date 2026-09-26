@@ -2,7 +2,7 @@
 use crate::{
     graph::{self, Budget, Edge, Graph, Walk},
     model::Program,
-    semantics::{Action, Env},
+    semantics::{Action, Env, State},
     syntax::*,
     temporal,
     trace::Trace,
@@ -56,7 +56,6 @@ pub struct ClaimResult {
 pub struct Report {
     pub status: Status,
     pub check: String,
-    pub semantics: String,
     pub weak_progress: bool,
     pub assumptions: Vec<String>,
     pub states: usize,
@@ -99,37 +98,15 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
     let mut report = Report {
         status: Status::Inconclusive,
         check: p.check.name.clone(),
-        semantics: p.check.semantics.clone(),
         weak_progress: p.check.fair,
         assumptions: vec![
-            if p.check.semantics == "actors-v2" {
-                "finite one-shot external send workload; optional inputs may remain unsubmitted"
-                    .into()
-            } else {
-                "finite one-shot input workload; unaccepted inputs may remain unaccepted".into()
-            },
-            if p.tables.is_empty() {
-                "no D1 tables selected; external resource failures, crashes, and unknown commit outcomes are not modeled".into()
-            } else {
-                "D1 primary-only; no replication, transport failures, crashes, or unknown commit outcomes".into()
-            },
-            if p.check.semantics == "actors-v2" {
-                format!(
-                    "actors-v2: finite FIFO mailboxes (capacity {} per address), run-to-completion state-in/state-out turns; outgoing sends become visible atomically with state commit; retained state is not durable",
-                    p.check.mailbox_bound.expect("validated profile")
-                )
-            } else if p.check.semantics == "actors-v1" {
-                "actors-v1: finite keyed state and direct typed request/reply; callers suspend across calls; local steps run to the next external effect; state retention is not durability".into()
-            } else {
-                "actors-v0: stateless and one-instance stateful actors; local steps run to the next external effect; state retention is not durability".into()
-            },
-            if p.check.semantics == "actors-v2" {
-                "internal mailbox processing is fault-free when weak progress is declared; optional inputs are not forced; loss, duplication, transport failures, timeouts, restarts, queues, and persistence are not modeled".into()
-            } else if p.check.semantics == "actors-v1" {
-                "actor calls assume eventual fault-free delivery when weak progress is declared; transport failures, timeouts, restarts, queues and persistence beyond D1 are not modeled".into()
-            } else {
-                "actor-to-actor calls, per-key instances, restarts, queues, and persistence beyond D1 are not modeled".into()
-            },
+            "finite one-shot external send workload; optional inputs may remain unsubmitted".into(),
+            format!(
+                "finite FIFO mailboxes (capacity {} per address), atomic state-in/state-out turns; outgoing sends become visible with state commit; retained state is not durable",
+                p.check.mailbox_bound.expect("validated mailbox bound")
+            ),
+            "processing is fault-free; weak progress, when declared, prevents starvation of continuously enabled mailboxes; optional inputs are not forced".into(),
+            "loss, duplication, transport failures, timeouts, restarts, external I/O, and persistence are not modeled".into(),
             if let Some(bound) = p.check.message_bound {
                 format!(
                     "message observations: {bound} lifetime slots per actor declaration, including external sends; no slot reuse; exhaustion is inconclusive"
@@ -177,32 +154,44 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
     let mut depths = vec![0usize];
     let mut cursor = 0;
     let mut failure = false;
+    let observe = |index: usize,
+                   report: &mut Report,
+                   states: &[State],
+                   graph: &Graph,
+                   prev: &graph::Predecessors,
+                   actions: &[Vec<Action>]|
+     -> Result<bool> {
+        for (i, c) in claims.iter().enumerate() {
+            if c.kind == ClaimKind::Property {
+                continue;
+            }
+            let value = p.predicate(&c.body, &Env::new(), &states[index])?;
+            if c.kind == ClaimKind::Invariant && !value {
+                let walk = graph::backtrack(graph, prev, index);
+                let trace = Trace::from_walk(source, p, c, None, &walk, graph, states, actions);
+                trace.validate(source, p)?;
+                report.claims[i].result = "VIOLATED".into();
+                report.claims[i].witness = Some(trace);
+                return Ok(true);
+            }
+            if c.kind == ClaimKind::Cover && value && report.claims[i].witness.is_none() {
+                let walk = graph::backtrack(graph, prev, index);
+                let trace = Trace::from_walk(source, p, c, None, &walk, graph, states, actions);
+                trace.validate(source, p)?;
+                report.claims[i].result = "REACHED".into();
+                report.claims[i].witness = Some(trace);
+            }
+        }
+        Ok(false)
+    };
     'search: while cursor < states.len() {
         if let Err(e) = budget.poll() {
             report.cutoff = Some(e.message);
             break;
         }
-        for (i, c) in claims.iter().enumerate() {
-            if c.kind == ClaimKind::Property {
-                continue;
-            }
-            let value = p.predicate(&c.body, &Env::new(), &states[cursor])?;
-            if c.kind == ClaimKind::Invariant && !value {
-                let walk = graph::backtrack(&graph, &prev, cursor);
-                let trace = Trace::from_walk(source, p, c, None, &walk, &graph, &states, &actions);
-                trace.validate(source, p)?;
-                report.claims[i].result = "VIOLATED".into();
-                report.claims[i].witness = Some(trace);
-                failure = true;
-                break 'search;
-            }
-            if c.kind == ClaimKind::Cover && value && report.claims[i].witness.is_none() {
-                let walk = graph::backtrack(&graph, &prev, cursor);
-                let trace = Trace::from_walk(source, p, c, None, &walk, &graph, &states, &actions);
-                trace.validate(source, p)?;
-                report.claims[i].result = "REACHED".into();
-                report.claims[i].witness = Some(trace);
-            }
+        if cursor == 0 && observe(0, &mut report, &states, &graph, &prev, &actions)? {
+            failure = true;
+            break;
         }
         let successors = match p.successors(&states[cursor]) {
             Ok(s) => s,
@@ -213,6 +202,7 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
             Err(e) => return Err(e),
         };
         for step in successors {
+            let fresh = !intern.contains_key(&step.state);
             let to = if let Some(&i) = intern.get(&step.state) {
                 i
             } else {
@@ -239,6 +229,12 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
                 fair: step.action.fair,
             });
             actions[cursor].push(step.action);
+            // Observe discovered states immediately: a later sibling hitting a
+            // search budget must not hide an already available finite witness.
+            if fresh && observe(to, &mut report, &states, &graph, &prev, &actions)? {
+                failure = true;
+                break 'search;
+            }
         }
         cursor += 1;
     }
@@ -270,6 +266,8 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
         }
         let mut violated = false;
         let mut inconclusive = false;
+        let mut unreached_antecedents = 0;
+        let mut response_clauses = 0;
         for (j, clause) in clauses.iter().enumerate() {
             let checked = temporal::evaluate(p, &states, &graph, clause, &budget);
             let witness = match checked {
@@ -290,20 +288,26 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
                 violated = true;
                 break;
             }
-            if clause.kind == temporal::Kind::Response
-                && !states
+            if clause.kind == temporal::Kind::Response {
+                response_clauses += 1;
+                if !states
                     .iter()
                     .map(|s| p.predicate(&clause.p, &clause.env, s))
                     .collect::<Result<Vec<_>>>()?
                     .iter()
                     .any(|x| *x)
-            {
-                report.claims[i].note =
-                    Some("vacuous: a response antecedent is never reached".into());
+                {
+                    unreached_antecedents += 1;
+                }
             }
         }
         if !violated && !inconclusive {
             report.claims[i].result = "VERIFIED_IN_SCOPE".into();
+            if unreached_antecedents > 0 {
+                report.claims[i].note = Some(format!(
+                    "{unreached_antecedents} of {response_clauses} response clauses have unreached antecedents (including unused observation slots)"
+                ));
+            }
         }
     }
     report.status = if report.claims.iter().any(|c| c.result == "VIOLATED") {

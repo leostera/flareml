@@ -1,0 +1,36 @@
+// The repair: ask storage to increment atomically, rather than read then write.
+type ClientId = Alice | Bob
+type ClientMessage = Start | Ack
+type StoreMessage = Increment(Address<Client>)
+type ClientState = ClientState { me: Address<Client>, done: Bool }
+actor Client(id: ClientId) {
+  init(id: ClientId): ClientState { ClientState { me: Client.at(id), done: false } }
+  handle_message(state: ClientState, message: ClientMessage): ClientState {
+    match message {
+      | Start -> { send(Store, Increment(state.me)) state }
+      | Ack -> ClientState { me: state.me, done: true }
+    }
+  }
+}
+actor Store {
+  init(): Int { 0 }
+  handle_message(state: Int, message: StoreMessage): Int {
+    match message { | Increment(reply_to) -> { send(reply_to, Ack) state + 1 } }
+  }
+}
+property "two completed increments retain both updates" {
+  always ((Client.at(Alice).state.done && Client.at(Bob).state.done) implies Store.state == 2)
+}
+property "both increments can finish" { reachable (Client.at(Alice).state.done && Client.at(Bob).state.done) }
+property "submitted clients finish" {
+  forall (id in ClientId) {
+    (exists (i in inputs(Client)) { i.target == Client.at(id) && i.submitted })
+      leads_to Client.at(id).state.done
+  }
+}
+check AtomicIncrements {
+  domain Int = 0..2
+  mailbox_bound = 2
+  inputs { once send(Client.at(Alice), Start) once send(Client.at(Bob), Start) }
+  fairness { weak runtime.progress }
+}

@@ -109,8 +109,8 @@ fn native_scheduler_matches_independent_fifo_machine() {
 type Msg = Hop | Stop
 actor A {{ handle_message(msg: Msg): unit {{ match msg {{ | Hop -> send(B, Stop) | Stop -> () }} }} }}
 actor B {{ handle_message(msg: Msg): unit {{ match msg {{ | Hop -> send(A, Stop) | Stop -> () }} }} }}
-invariant "reference corpus" {{ true }}
-check C {{ semantics = "actors-v2" mailbox_bound = {bound} inputs {{ {inputs} }} {} }}
+property "reference corpus" {{ always true }}
+check C {{ mailbox_bound = {bound} inputs {{ {inputs} }} {} }}
 "#,
                     if fair {
                         "fairness { weak runtime.progress }"

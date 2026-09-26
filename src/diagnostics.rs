@@ -1,7 +1,6 @@
 //! Terminal presentation is separate from machine-readable results and trace identity.
 use crate::{
     checker::{Report, Status},
-    semantics::Value,
     syntax::{ClaimKind, Error, Span},
     trace::Trace,
 };
@@ -81,15 +80,6 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
             .unwrap();
         }
     }
-    for (name, rows) in &trace.states[0].tables {
-        writeln!(
-            out,
-            "    {} {name} = {}",
-            paint("initial", Tone::Dim, color),
-            Value::List(rows.clone())
-        )
-        .unwrap();
-    }
     for (i, action) in trace.actions.iter().enumerate() {
         if trace.loop_start == Some(i) {
             writeln!(
@@ -146,20 +136,6 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
                     )
                     .unwrap();
                 }
-            }
-        }
-        for (table, rows) in &after.tables {
-            if before.tables.get(table) != Some(rows) {
-                writeln!(
-                    out,
-                    "        {}",
-                    paint(
-                        &format!("{table} := {}", Value::List(rows.clone())),
-                        Tone::Warn,
-                        color
-                    )
-                )
-                .unwrap();
             }
         }
     }
@@ -223,9 +199,9 @@ pub fn render_report(report: &Report, file: &str, source: &str, color: bool) -> 
             _ => ("?", Tone::Warn),
         };
         let kind = match c.kind {
-            ClaimKind::Invariant => "invariant",
-            ClaimKind::Property => "property",
-            ClaimKind::Cover => "cover",
+            ClaimKind::Invariant => "property [safety]",
+            ClaimKind::Property => "property [temporal]",
+            ClaimKind::Cover => "property [reachability]",
         };
         writeln!(
             out,
@@ -267,9 +243,8 @@ pub fn render_report(report: &Report, file: &str, source: &str, color: bool) -> 
     .unwrap();
     writeln!(
         out,
-        "  {} input slots · {} · fairness {}",
+        "  {} input slots · fairness {}",
         report.input_slots,
-        report.semantics,
         if report.weak_progress {
             "weak runtime.progress"
         } else {

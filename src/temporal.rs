@@ -26,13 +26,21 @@ pub struct Clause {
     pub q: Option<Expr>,
 }
 pub fn clauses(program: &Program, initial: &State, expr: &Expr) -> Result<Vec<Clause>> {
-    fn expand(p: &Program, s: &State, e: &Expr, env: &Env, out: &mut Vec<Clause>) -> Result<()> {
-        if out.len() > 4096 {
+    fn expand(
+        p: &Program,
+        s: &State,
+        e: &Expr,
+        env: &Env,
+        out: &mut Vec<Clause>,
+        remaining: &mut usize,
+    ) -> Result<()> {
+        if *remaining == 0 {
             return Err(Error::new(
                 e.span,
-                "temporal expansion exceeds 4096 clauses",
+                "LIMIT: temporal expansion exceeds 10000 steps",
             ));
         }
+        *remaining -= 1;
         match &e.kind {
             ExprKind::Quant {
                 all: true,
@@ -40,16 +48,16 @@ pub fn clauses(program: &Program, initial: &State, expr: &Expr) -> Result<Vec<Cl
                 domain,
                 body,
             } => {
-                for v in p.collection(p.eval(domain, env, s)?, s, domain.span)? {
+                for v in p.eval_domain(domain, env, s)? {
                     let mut env = env.clone();
                     env.insert(var.clone(), v);
-                    expand(p, s, body, &env, out)?;
+                    expand(p, s, body, &env, out, remaining)?;
                 }
                 return Ok(());
             }
             ExprKind::Binary(op, a, b) if op == "&&" => {
-                expand(p, s, a, env, out)?;
-                expand(p, s, b, env, out)?;
+                expand(p, s, a, env, out, remaining)?;
+                expand(p, s, b, env, out, remaining)?;
                 return Ok(());
             }
             _ => {}
@@ -88,6 +96,12 @@ pub fn clauses(program: &Program, initial: &State, expr: &Expr) -> Result<Vec<Cl
             },
             _ => return Err(Error::new(e.span, "unsupported temporal clause")),
         };
+        if out.len() >= 4096 {
+            return Err(Error::new(
+                e.span,
+                "LIMIT: temporal expansion exceeds 4096 clauses",
+            ));
+        }
         out.push(Clause {
             expr: e.clone(),
             env: env.clone(),
@@ -98,7 +112,7 @@ pub fn clauses(program: &Program, initial: &State, expr: &Expr) -> Result<Vec<Cl
         Ok(())
     }
     let mut out = vec![];
-    expand(program, initial, expr, &Env::new(), &mut out)?;
+    expand(program, initial, expr, &Env::new(), &mut out, &mut 10_000)?;
     Ok(out)
 }
 pub fn evaluate(
@@ -121,7 +135,7 @@ pub fn evaluate(
     }
     counterexample(g, c.kind, &ps, &qs, budget)
 }
-/// Graph-only kernel: independent of the language evaluator and Cloudflare semantics.
+/// Graph-only kernel: independent of the language evaluator and message scheduler.
 pub fn counterexample(
     g: &Graph,
     kind: Kind,

@@ -1,6 +1,6 @@
 // A counter commits an increment and explicitly sends a correlated reply.
 // The client cannot process the reply before that commit.
-// actors-v2 assumes finite, fault-free mailboxes, not a deployment runtime or durability.
+// Finite, fault-free mailboxes model a protocol, not a deployment runtime or durability.
 type CounterId = Main
 type ClientId = User
 type RequestId = First
@@ -30,10 +30,10 @@ actor Client(id: ClientId) {
   }
 }
 
-invariant "reply cannot be processed before the counter commits" {
-  Client.at(User).state == Observed implies Counter.at(Main).state == 1
+property "reply cannot be processed before the counter commits" {
+  always (Client.at(User).state == Observed implies Counter.at(Main).state == 1)
 }
-cover "client receives reply" { Client.at(User).state == Observed }
+property "client receives reply" { reachable (Client.at(User).state == Observed) }
 
 property "submitted increments eventually receive a reply" {
   forall (i in inputs(Counter)) {
@@ -47,12 +47,11 @@ property "generated replies are eventually processed" {
   }
 }
 
-cover "a reply was generated internally" {
-  exists (m in messages(Client)) { m.sent && !m.external }
+property "a reply was generated internally" {
+  reachable (exists (m in messages(Client)) { m.sent && !m.external })
 }
 
 check OneIncrement {
-  semantics = "actors-v2"
   domain Int = 0..1
   mailbox_bound = 2
   message_bound = 2

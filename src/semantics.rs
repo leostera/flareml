@@ -1,10 +1,7 @@
-//! Small-step, deterministic semantics. Nondeterminism comes from enabled scheduling choices.
-use crate::{
-    model::{Instruction, Program},
-    syntax::*,
-};
+//! Values, finite domains and deterministic local evaluation. Scheduling is in messaging.
+use crate::{model::Program, syntax::*};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Value {
@@ -15,13 +12,9 @@ pub enum Value {
     Variant(String, Vec<Value>),
     Record(String, BTreeMap<String, Value>),
     List(Vec<Value>),
-    Request(usize),
     Input(usize),
     Message(String, usize),
-    Actor(String),
-    KeyedActor(String, Box<Value>),
     Address(String, Box<Value>),
-    Rows(String),
 }
 impl Value {
     pub fn none() -> Self {
@@ -57,59 +50,20 @@ impl std::fmt::Display for Value {
                 f,
                 "{n} {{ {} }}",
                 fs.iter()
-                    .map(|(k, v)| format!("{k}: {v}"))
+                    .map(|(n, x)| format!("{n}: {x}"))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
             Self::List(xs) => write!(f, "[{}]", joined(xs)),
-            Self::Request(i) => write!(f, "request #{i}"),
             Self::Input(i) => write!(f, "input #{i}"),
             Self::Message(actor, i) => write!(f, "{actor} message #{i}"),
-            Self::Actor(name) => write!(f, "actor {name}"),
-            Self::KeyedActor(name, key) => write!(f, "actor {name}.at({key})"),
+            Self::Address(name, key) if **key == Value::Unit => write!(f, "{name}"),
             Self::Address(name, key) => write!(f, "{name}.at({key})"),
-            Self::Rows(n) => write!(f, "{n}.rows"),
         }
     }
 }
 pub type Env = BTreeMap<String, Value>;
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Phase {
-    Unaccepted,
-    Ready(usize),
-    Waiting {
-        child: usize,
-        bind: Option<String>,
-        next: usize,
-        pc: usize,
-    },
-    Pending {
-        table: String,
-        method: String,
-        args: Vec<Value>,
-        bind: Option<String>,
-        next: usize,
-        pc: usize,
-    },
-    Done,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Continuation {
-    pub env: Env,
-    pub bind: Option<String>,
-    pub next: usize,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Frame {
-    pub handler: String,
-    pub key: Option<Value>,
-    pub parent: Option<usize>,
-    pub input: Value,
-    pub env: Env,
-    pub phase: Phase,
-    pub response: Value,
-    pub stack: Vec<Continuation>,
-}
+pub(crate) type Outbox = Vec<(Value, Value, Span)>;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Envelope {
@@ -127,32 +81,21 @@ pub struct MessageObservation {
     pub processed: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct State {
     pub actors: BTreeMap<String, Value>,
     #[serde(with = "keyed_actor_serde")]
     pub keyed_actors: BTreeMap<String, BTreeMap<Value, Value>>,
-    pub tables: BTreeMap<String, Vec<Value>>,
-    pub frames: Vec<Frame>,
-    #[serde(
-        default,
-        skip_serializing_if = "BTreeMap::is_empty",
-        with = "mailbox_serde"
-    )]
+    #[serde(with = "mailbox_serde")]
     pub mailboxes: BTreeMap<Value, Vec<Envelope>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_submitted: Vec<bool>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_processed: Vec<bool>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub messages: BTreeMap<String, Vec<MessageObservation>>,
 }
-// JSON objects require string keys. Actor identities are typed Values, so encode
-// per-actor state as ordered (identity, state) pairs instead of stringifying keys.
 mod keyed_actor_serde {
     use super::Value;
     use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
     use std::collections::BTreeMap;
-
     pub fn serialize<S: Serializer>(
         values: &BTreeMap<String, BTreeMap<Value, Value>>,
         serializer: S,
@@ -184,7 +127,6 @@ mod mailbox_serde {
     use super::{Envelope, Value};
     use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
     use std::collections::BTreeMap;
-
     pub fn serialize<S: Serializer>(
         values: &BTreeMap<Value, Vec<Envelope>>,
         serializer: S,
@@ -204,6 +146,7 @@ mod mailbox_serde {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Action {
     pub id: String,
     pub description: String,
@@ -218,153 +161,43 @@ pub struct Step {
 
 impl Program {
     pub fn initial(&self) -> Result<State> {
-        if self.check.semantics == "actors-v2" {
-            return self.initial_messages();
-        }
-        let mut s = State {
-            tables: self.tables.keys().map(|n| (n.clone(), vec![])).collect(),
-            ..State::default()
-        };
-        for actor in self.actors.values() {
-            if let Some((_, initial)) = &actor.state {
-                if let Some((param, ty)) = &actor.key {
-                    let mut keys = self.domain(&ty.name, 0)?;
-                    keys.sort();
-                    keys.dedup();
-                    if keys.is_empty() {
-                        return Err(Error::new(
-                            actor.span,
-                            "LIMIT: actor identity domain is empty or missing",
-                        ));
-                    }
-                    if keys.len() > 4096 {
-                        return Err(Error::new(
-                            actor.span,
-                            "LIMIT: keyed actor domain exceeds 4096 identities",
-                        ));
-                    }
-                    let mut instances = BTreeMap::new();
-                    for key in keys {
-                        self.check_value(&key, actor.span)?;
-                        let value =
-                            self.eval(initial, &Env::from([(param.clone(), key.clone())]), &s)?;
-                        self.check_value(&value, initial.span)?;
-                        instances.insert(key, value);
-                    }
-                    s.keyed_actors.insert(actor.name.clone(), instances);
-                } else {
-                    let value = self.eval(initial, &Env::new(), &s)?;
-                    self.check_value(&value, initial.span)?;
-                    s.actors.insert(actor.name.clone(), value);
-                }
-            }
-        }
-        for (n, xs) in &self.check.init {
-            let mut rows = vec![];
-            for x in xs {
-                let v = self.eval(x, &Env::new(), &s)?;
-                self.check_value(&v, x.span)?;
-                rows.push(v);
-            }
-            rows.sort();
-            if !self.valid_rows(n, &rows) {
-                return Err(Error::new(
-                    self.check.span,
-                    format!("initial constraint violation in {n}"),
-                ));
-            }
-            s.tables.insert(n.clone(), rows);
-        }
-        for i in &self.check.inputs {
-            let key = i
-                .key
-                .as_ref()
-                .map(|e| self.eval(e, &Env::new(), &s))
-                .transpose()?;
-            if let Some(key) = &key {
-                self.check_value(key, i.span)?;
-                if !s.keyed_actors[&self.handlers[&i.handler].actor].contains_key(key) {
-                    return Err(Error::new(
-                        i.span,
-                        "LIMIT: actor key outside finite identity domain",
-                    ));
-                }
-            }
-            let input = self.eval(&i.value, &Env::new(), &s)?;
-            self.check_value(&input, i.span)?;
-            s.frames.push(Frame {
-                handler: i.handler.clone(),
-                key,
-                parent: None,
-                input,
-                env: Env::new(),
-                phase: Phase::Unaccepted,
-                response: Value::none(),
-                stack: vec![],
-            });
-        }
-        Ok(s)
+        self.initial_messages()
+    }
+    pub fn successors(&self, s: &State) -> Result<Vec<Step>> {
+        self.message_successors(s)
     }
     pub fn check_value(&self, v: &Value, span: Span) -> Result<()> {
-        if self.check.semantics == "actors-v2" {
-            let mut remaining = 4096usize;
-            let mut pending = vec![(v, 0)];
-            while let Some((value, depth)) = pending.pop() {
-                if remaining == 0 || depth > 64 {
-                    return Err(Error::new(
-                        span,
-                        "LIMIT: value exceeds 4096 nodes or nesting depth 64",
-                    ));
+        let mut remaining = 4096usize;
+        let mut pending = vec![(v, 0)];
+        while let Some((value, depth)) = pending.pop() {
+            if remaining == 0 || depth > 64 {
+                return Err(Error::new(
+                    span,
+                    "LIMIT: value exceeds 4096 nodes or nesting depth 64",
+                ));
+            }
+            remaining -= 1;
+            match value {
+                Value::Variant(_, xs) | Value::List(xs) => {
+                    pending.extend(xs.iter().map(|v| (v, depth + 1)))
                 }
-                remaining -= 1;
-                match value {
-                    Value::Variant(_, xs) | Value::List(xs) => {
-                        pending.extend(xs.iter().map(|v| (v, depth + 1)))
+                Value::Record(_, fs) => pending.extend(fs.values().map(|v| (v, depth + 1))),
+                Value::Address(_, key) => pending.push((key, depth + 1)),
+                Value::Int(_) | Value::String(_) => {
+                    let name = if matches!(value, Value::Int(_)) {
+                        "Int"
+                    } else {
+                        "String"
+                    };
+                    if !self.domain(name, 0)?.contains(value) {
+                        return Err(Error::new(
+                            span,
+                            format!("LIMIT: value {value:?} escapes domain {name}"),
+                        ));
                     }
-                    Value::Record(_, fs) => pending.extend(fs.values().map(|v| (v, depth + 1))),
-                    Value::Address(_, key) => pending.push((key, depth + 1)),
-                    _ => {}
                 }
+                _ => {}
             }
-        }
-        self.check_value_domains(v, span)
-    }
-    fn check_value_domains(&self, v: &Value, span: Span) -> Result<()> {
-        match v {
-            Value::Int(_) | Value::String(_) => {
-                let name = if matches!(v, Value::Int(_)) {
-                    "Int"
-                } else {
-                    "String"
-                };
-                let xs =
-                    self.check.domains.get(name).ok_or_else(|| {
-                        Error::new(span, format!("missing finite domain for {name}"))
-                    })?;
-                let empty = State::default();
-                let values = xs
-                    .iter()
-                    .map(|x| self.eval(x, &Env::new(), &empty))
-                    .collect::<Result<Vec<_>>>()?;
-                if !values.contains(v) {
-                    return Err(Error::new(
-                        span,
-                        format!("LIMIT: value {v:?} escapes domain {name}"),
-                    ));
-                }
-            }
-            Value::Address(_, key) => self.check_value_domains(key, span)?,
-            Value::Variant(_, xs) | Value::List(xs) => {
-                for x in xs {
-                    self.check_value_domains(x, span)?;
-                }
-            }
-            Value::Record(_, fs) => {
-                for x in fs.values() {
-                    self.check_value_domains(x, span)?;
-                }
-            }
-            _ => {}
         }
         Ok(())
     }
@@ -372,7 +205,7 @@ impl Program {
         if depth > 24 {
             return Err(Error::new(
                 Span::default(),
-                "recursive or excessively nested value domain is unsupported",
+                "LIMIT: value domain nesting exceeds 24",
             ));
         }
         if let Some(a) = self.aliases.get(name) {
@@ -385,8 +218,10 @@ impl Program {
             return Ok(vec![Value::Unit]);
         }
         if let Some(xs) = self.check.domains.get(name) {
-            let s = State::default();
-            return xs.iter().map(|x| self.eval(x, &Env::new(), &s)).collect();
+            return xs
+                .iter()
+                .map(|x| self.eval(x, &Env::new(), &State::default()))
+                .collect();
         }
         let mut out = vec![];
         for (n, c) in self.constructors.iter().filter(|(_, c)| c.ty == name) {
@@ -405,7 +240,7 @@ impl Program {
                         if next.len() >= 4096 {
                             return Err(Error::new(
                                 Span::default(),
-                                "finite domain product exceeds elaboration limit (4096)",
+                                "LIMIT: finite domain product exceeds 4096",
                             ));
                         }
                         let mut xs = prefix.clone();
@@ -425,7 +260,7 @@ impl Program {
             if out.len() > 4096 {
                 return Err(Error::new(
                     Span::default(),
-                    "finite domain exceeds elaboration limit (4096)",
+                    "LIMIT: finite domain exceeds 4096",
                 ));
             }
         }
@@ -441,10 +276,10 @@ impl Program {
         if depth > 24 {
             return Err(Error::new(
                 Span::default(),
-                "recursive domain is unsupported",
+                "LIMIT: value domain nesting exceeds 24",
             ));
         }
-        if self.check.semantics == "actors-v2" && t.name == "Address" && t.args.len() == 1 {
+        if t.name == "Address" {
             let actor = &self.actors[&t.args[0].name];
             let keys = if let Some((_, key)) = &actor.key {
                 self.type_domain(key, depth + 1)?
@@ -456,7 +291,7 @@ impl Program {
                 .map(|key| Value::Address(actor.name.clone(), Box::new(key)))
                 .collect());
         }
-        if t.name == "Option" && t.args.len() == 1 {
+        if t.name == "Option" {
             let mut v = vec![Value::none()];
             v.extend(
                 self.type_domain(&t.args[0], depth + 1)?
@@ -464,26 +299,36 @@ impl Program {
                     .map(Value::some),
             );
             Ok(v)
-        } else if !t.args.is_empty() {
-            Err(Error::new(
-                Span::default(),
-                "enumeration of this generic domain is not supported",
-            ))
+        } else if t.name == "Result" {
+            let mut v = vec![];
+            for (name, ty) in ["Ok", "Err"].into_iter().zip(&t.args) {
+                v.extend(
+                    self.type_domain(ty, depth + 1)?
+                        .into_iter()
+                        .map(|x| Value::Variant(name.into(), vec![x])),
+                );
+            }
+            Ok(v)
         } else {
             self.domain(&t.name, depth + 1)
         }
     }
-    pub fn collection(&self, v: Value, s: &State, span: Span) -> Result<Vec<Value>> {
-        match v {
+    pub fn eval_domain(&self, expr: &Expr, env: &Env, s: &State) -> Result<Vec<Value>> {
+        if let ExprKind::Name(n) = &expr.kind
+            && !env.contains_key(n)
+            && self.model.types.iter().any(|d| &d.name == n)
+        {
+            return self.domain(n, 0);
+        }
+        match self.eval(expr, env, s)? {
             Value::List(xs) => Ok(xs),
-            Value::Rows(n) => Ok(s.tables[&n].clone()),
-            _ => Err(Error::new(span, "expected finite collection")),
+            _ => Err(Error::new(expr.span, "expected a finite collection")),
         }
     }
     pub fn eval(&self, e: &Expr, env: &Env, s: &State) -> Result<Value> {
         let _guard = crate::evaluation::EvaluationGuard::enter(e.span)?;
         use ExprKind::*;
-        if let ExprKind::Field(_, field) = &e.kind
+        if let Field(_, field) = &e.kind
             && field == "state"
             && let Some((path, Some(key))) = actor_target(e)
             && let Some(name) = path.strip_suffix(".state")
@@ -510,14 +355,6 @@ impl Program {
                 .cloned()
                 .ok_or_else(|| Error::new(e.span, "actor has no initialized state"));
         }
-        if let Some(path) = e.path()
-            && path.ends_with(".rows")
-        {
-            let table = path.trim_end_matches(".rows");
-            if self.tables.contains_key(table) {
-                return Ok(Value::Rows(table.into()));
-            }
-        }
         let ev = |x: &Expr| self.eval(x, env, s);
         match &e.kind {
             Bool(b) => Ok(Value::Bool(*b)),
@@ -528,9 +365,7 @@ impl Program {
                 if let Some(v) = env.get(n) {
                     return Ok(v.clone());
                 }
-                if self.check.semantics == "actors-v2"
-                    && self.actors.get(n).is_some_and(|a| a.key.is_none())
-                {
+                if self.actors.get(n).is_some_and(|a| a.key.is_none()) {
                     return Ok(Value::Address(n.clone(), Box::new(Value::Unit)));
                 }
                 if n == "None" {
@@ -549,73 +384,40 @@ impl Program {
             )),
             List(xs) => Ok(Value::List(xs.iter().map(ev).collect::<Result<_>>()?)),
             Field(x, n) => match ev(x)? {
-                Value::Actor(actor) if n == "state" => s
-                    .actors
-                    .get(&actor)
-                    .cloned()
-                    .ok_or_else(|| Error::new(e.span, "actor capability has no state")),
-                Value::KeyedActor(actor, key) if n == "state" => s
-                    .keyed_actors
-                    .get(&actor)
-                    .and_then(|instances| instances.get(&key))
-                    .cloned()
-                    .ok_or_else(|| Error::new(e.span, "actor capability has no state")),
                 Value::Record(_, fs) => fs
                     .get(n)
                     .cloned()
                     .ok_or_else(|| Error::new(e.span, "missing record field")),
                 Value::Input(i) => self.input_field(i, n, s, e.span),
                 Value::Message(actor, i) => self.message_field(&actor, i, n, s, e.span),
-                Value::Request(i) => {
-                    let f = s
-                        .frames
-                        .get(i)
-                        .ok_or_else(|| Error::new(e.span, "invalid request slot"))?;
-                    match n.as_str() {
-                        "input" => Ok(f.input.clone()),
-                        "response" => Ok(f.response.clone()),
-                        "accepted" => Ok(Value::Bool(!matches!(f.phase, Phase::Unaccepted))),
-                        "completed" => Ok(Value::Bool(matches!(f.phase, Phase::Done))),
-                        _ => Err(Error::new(e.span, "unknown request field")),
-                    }
-                }
                 _ => Err(Error::new(e.span, "cannot inspect field")),
             },
             Call(f, args) => {
                 let path = f.path().unwrap_or_default();
-                if let ExprKind::Field(actor, method) = &f.kind
+                if let Field(actor, method) = &f.kind
                     && method == "at"
-                    && let ExprKind::Name(name) = &actor.kind
+                    && let Name(name) = &actor.kind
                     && self.actors.get(name).is_some_and(|a| a.key.is_some())
                 {
-                    let key = ev(&args[0])?;
-                    if !(if self.check.semantics == "actors-v2" {
-                        s.mailboxes
-                            .contains_key(&Value::Address(name.clone(), Box::new(key.clone())))
-                    } else {
-                        s.keyed_actors
-                            .get(name)
-                            .is_some_and(|values| values.contains_key(&key))
-                    }) {
+                    let address = Value::Address(name.clone(), Box::new(ev(&args[0])?));
+                    if !s.mailboxes.contains_key(&address) {
                         return Err(Error::new(
                             e.span,
                             "LIMIT: actor key outside finite identity domain",
                         ));
                     }
-                    return Ok(Value::Address(name.clone(), Box::new(key)));
+                    return Ok(address);
                 }
                 if let Some(function) = self.functions.get(&path) {
-                    if self.effects[&path].suspends_or_writes() {
+                    if self.effects[&path].sends {
                         return Err(Error::new(
                             e.span,
-                            "internal: effectful function reached pure evaluation",
+                            "internal: send helper reached pure evaluation",
                         ));
                     }
                     let values = args.iter().map(ev).collect::<Result<Vec<_>>>()?;
-                    if self.check.semantics == "actors-v2" {
-                        for value in &values {
-                            self.check_value(value, e.span)?;
-                        }
+                    for value in &values {
+                        self.check_value(value, e.span)?;
                     }
                     let mut locals = function
                         .params
@@ -623,16 +425,16 @@ impl Program {
                         .zip(values)
                         .map(|((name, _), v)| (name.clone(), v))
                         .collect();
-                    return self.eval_function_body(&function.body, &mut locals, s);
+                    return self.eval_body(&function.body, &mut locals, s, None);
                 }
-                if self.check.semantics == "actors-v2" && (path == "inputs" || path == "messages") {
+                if path == "inputs" || path == "messages" {
                     let actor = args[0].path().unwrap_or_default();
                     return Ok(Value::List(if path == "inputs" {
                         self.check
                             .inputs
                             .iter()
                             .enumerate()
-                            .filter(|(_, input)| self.handlers[&input.handler].actor == actor)
+                            .filter(|(_, input)| input.actor == actor)
                             .map(|(i, _)| Value::Input(i))
                             .collect()
                     } else {
@@ -640,18 +442,6 @@ impl Program {
                             .map(|i| Value::Message(actor.clone(), i))
                             .collect()
                     }));
-                }
-                if path == "requests" {
-                    let h = args[0].path().unwrap_or_default();
-                    return Ok(Value::List(
-                        self.check
-                            .inputs
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, x)| x.handler == h)
-                            .map(|(i, _)| Value::Request(i))
-                            .collect(),
-                    ));
                 }
                 if ["Some", "Ok", "Err"].contains(&path.as_str())
                     || self.constructors.contains_key(&path)
@@ -661,38 +451,22 @@ impl Program {
                         args.iter().map(ev).collect::<Result<_>>()?,
                     ));
                 }
-                if let ExprKind::Field(receiver, method) = &f.kind
-                    && method == "contains_key"
-                {
-                    let Value::Rows(n) = ev(receiver)? else {
-                        return Err(Error::new(e.span, "expected rows view"));
-                    };
-                    let key = ev(&args[0])?;
-                    return Ok(Value::Bool(
-                        s.tables[&n]
-                            .iter()
-                            .any(|row| self.key(&n, row) == Some(&key)),
-                    ));
-                }
                 Err(Error::new(
                     e.span,
                     "effectful or unsupported operation in pure evaluator",
                 ))
             }
-            Unary(op, x) => {
-                let v = ev(x)?;
-                match (op.as_str(), v) {
-                    ("!" | "not", Value::Bool(b)) => Ok(Value::Bool(!b)),
-                    ("-", Value::Int(i)) => i
-                        .checked_neg()
-                        .map(Value::Int)
-                        .ok_or_else(|| Error::new(e.span, "LIMIT: integer overflow")),
-                    _ => Err(Error::new(
-                        e.span,
-                        "cannot evaluate temporal or invalid unary expression as a state predicate",
-                    )),
-                }
-            }
+            Unary(op, x) => match (op.as_str(), ev(x)?) {
+                ("!" | "not", Value::Bool(b)) => Ok(Value::Bool(!b)),
+                ("-", Value::Int(i)) => i
+                    .checked_neg()
+                    .map(Value::Int)
+                    .ok_or_else(|| Error::new(e.span, "LIMIT: integer overflow")),
+                _ => Err(Error::new(
+                    e.span,
+                    "cannot evaluate temporal or invalid unary expression as a state predicate",
+                )),
+            },
             Binary(op, a, b) => {
                 let av = ev(a)?;
                 if op == "&&" && !av.bool(a.span)? {
@@ -740,12 +514,10 @@ impl Program {
                 domain,
                 body,
             } => {
-                let xs = self.collection(ev(domain)?, s, domain.span)?;
-                for v in xs {
+                for v in self.eval_domain(domain, env, s)? {
                     let mut env = env.clone();
                     env.insert(var.clone(), v);
-                    let b = self.eval(body, &env, s)?.bool(body.span)?;
-                    if b != *all {
+                    if self.eval(body, &env, s)?.bool(body.span)? != *all {
                         return Ok(Value::Bool(!all));
                     }
                 }
@@ -753,11 +525,14 @@ impl Program {
             }
         }
     }
-    pub(crate) fn eval_function_body(
+    /// The same statement interpreter serves pure helpers, initializers and turns.
+    /// Only a turn supplies an outbox; it is never published during evaluation.
+    pub(crate) fn eval_body(
         &self,
         body: &[Stmt],
         env: &mut Env,
         s: &State,
+        mut outbox: Option<&mut Outbox>,
     ) -> Result<Value> {
         let _guard = crate::evaluation::EvaluationGuard::enter(
             body.first().map_or(Span::default(), |s| s.span),
@@ -766,465 +541,84 @@ impl Program {
         for statement in body {
             result = match &statement.kind {
                 StmtKind::Let(name, expr) => {
-                    let value = self.eval(expr, env, s)?;
-                    if self.check.semantics == "actors-v2" {
-                        self.check_value(&value, expr.span)?;
-                    }
+                    let value = self.eval_statement(expr, env, s, outbox.as_deref_mut())?;
+                    self.check_value(&value, expr.span)?;
                     env.insert(name.clone(), value);
                     Value::Unit
                 }
-                StmtKind::Expr(expr) => {
-                    let value = self.eval(expr, env, s)?;
-                    if self.check.semantics == "actors-v2" {
-                        self.check_value(&value, expr.span)?;
-                    }
-                    value
-                }
+                StmtKind::Expr(expr) => self.eval_statement(expr, env, s, outbox.as_deref_mut())?,
                 StmtKind::Match(expr, arms) => {
                     let value = self.eval(expr, env, s)?;
-                    if self.check.semantics == "actors-v2" {
-                        self.check_value(&value, expr.span)?;
-                    }
-                    let mut result = None;
+                    self.check_value(&value, expr.span)?;
+                    let mut chosen = None;
                     for (pattern, branch) in arms {
                         let mut locals = env.clone();
                         if bind_pattern(pattern, &value, &mut locals) {
-                            result = Some(self.eval_function_body(branch, &mut locals, s)?);
+                            chosen = Some(self.eval_body(
+                                branch,
+                                &mut locals,
+                                s,
+                                outbox.as_deref_mut(),
+                            )?);
                             break;
                         }
                     }
-                    result.ok_or_else(|| {
-                        Error::new(
-                            statement.span,
-                            "internal: non-exhaustive pure function match",
-                        )
+                    chosen.ok_or_else(|| {
+                        Error::new(statement.span, "internal: non-exhaustive match")
                     })?
                 }
             };
-        }
-        if self.check.semantics == "actors-v2" {
-            self.check_value(&result, body.last().map_or(Span::default(), |s| s.span))?;
+            self.check_value(&result, statement.span)?;
         }
         Ok(result)
     }
+    fn eval_statement(
+        &self,
+        expr: &Expr,
+        env: &Env,
+        s: &State,
+        outbox: Option<&mut Outbox>,
+    ) -> Result<Value> {
+        if let Some(outbox) = outbox
+            && let ExprKind::Call(target, args) = &expr.kind
+        {
+            let path = target.path().unwrap_or_default();
+            if path == "send" {
+                let address = self.eval(&args[0], env, s)?;
+                let message = self.eval(&args[1], env, s)?;
+                self.check_value(&message, expr.span)?;
+                if !s.mailboxes.contains_key(&address) {
+                    return Err(Error::new(
+                        expr.span,
+                        "LIMIT: send target outside finite identity domain",
+                    ));
+                }
+                outbox.push((address, message, expr.span));
+                return Ok(Value::Unit);
+            }
+            if let Some(f) = self.functions.get(&path)
+                && self.effects[&path].sends
+            {
+                let values = args
+                    .iter()
+                    .map(|e| self.eval(e, env, s))
+                    .collect::<Result<Vec<_>>>()?;
+                for v in &values {
+                    self.check_value(v, expr.span)?;
+                }
+                let mut locals = f
+                    .params
+                    .iter()
+                    .zip(values)
+                    .map(|((name, _), value)| (name.clone(), value))
+                    .collect();
+                return self.eval_body(&f.body, &mut locals, s, Some(outbox));
+            }
+        }
+        self.eval(expr, env, s)
+    }
     pub fn predicate(&self, e: &Expr, env: &Env, s: &State) -> Result<bool> {
         self.eval(e, env, s)?.bool(e.span)
-    }
-    fn key<'a>(&self, table: &str, row: &'a Value) -> Option<&'a Value> {
-        let key = self.tables[table].fields.iter().find(|(_, f)| f.primary)?.0;
-        if let Value::Record(_, fs) = row {
-            fs.get(key)
-        } else {
-            None
-        }
-    }
-    fn valid_rows(&self, table: &str, rows: &[Value]) -> bool {
-        for (n, f) in &self.tables[table].fields {
-            if f.primary || f.unique {
-                let mut seen = BTreeSet::new();
-                for row in rows {
-                    let Value::Record(_, fs) = row else {
-                        return false;
-                    };
-                    let Some(v) = fs.get(n) else {
-                        return false;
-                    };
-                    if !f.primary && *v == Value::none() {
-                        continue;
-                    }
-                    if !seen.insert(v) {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    }
-    fn operation(&self, table: &str, method: &str, args: &[Value], s: &mut State) -> Value {
-        let old = s.tables[table].clone();
-        if method == "get" {
-            return old
-                .iter()
-                .find(|r| self.key(table, r) == Some(&args[0]))
-                .cloned()
-                .map(Value::some)
-                .unwrap_or_else(Value::none);
-        }
-        let mut rows = old.clone();
-        let mut error = None;
-        match method {
-            "insert" => rows.push(args[0].clone()),
-            "update" | "delete" => {
-                if let Some(i) = rows
-                    .iter()
-                    .position(|r| self.key(table, r) == Some(&args[0]))
-                {
-                    if method == "update" {
-                        rows[i] = args[1].clone();
-                    } else {
-                        rows.remove(i);
-                    }
-                } else {
-                    error = Some("MissingRow");
-                }
-            }
-            _ => unreachable!("type checked operation"),
-        }
-        if !self.valid_rows(table, &rows) {
-            error = Some("ConstraintViolation");
-        }
-        if let Some(e) = error {
-            Value::Variant("Err".into(), vec![Value::Variant(e.into(), vec![])])
-        } else {
-            rows.sort();
-            s.tables.insert(table.into(), rows);
-            Value::Variant("Ok".into(), vec![Value::Unit])
-        }
-    }
-    pub fn successors(&self, s: &State) -> Result<Vec<Step>> {
-        if self.check.semantics == "actors-v2" {
-            return self.message_successors(s);
-        }
-        let mut steps = vec![Step {
-            action: Action {
-                id: "stutter".into(),
-                description: "stutter".into(),
-                span: Span::default(),
-                fair: false,
-            },
-            state: s.clone(),
-        }];
-        for (i, frame) in s.frames.iter().enumerate() {
-            let mut next = s.clone();
-            let h = &self.handlers[&frame.handler];
-            let (description, span, id, fair) = match &frame.phase {
-                Phase::Unaccepted => {
-                    let function = &self.functions[&h.function];
-                    let mut args = vec![];
-                    if self.actors[&h.actor].state.is_some() {
-                        args.push(match &frame.key {
-                            Some(key) => Value::KeyedActor(h.actor.clone(), Box::new(key.clone())),
-                            None => Value::Actor(h.actor.clone()),
-                        });
-                    }
-                    args.push(frame.input.clone());
-                    next.frames[i].env = function
-                        .params
-                        .iter()
-                        .zip(args)
-                        .map(|((name, _), v)| (name.clone(), v))
-                        .collect();
-                    next.frames[i].phase = Phase::Ready(self.entries[&h.function]);
-                    (
-                        format!("accept {}({}) as request #{i}", frame.handler, frame.input),
-                        if frame.parent.is_some() {
-                            h.span
-                        } else {
-                            self.check.inputs[i].span
-                        },
-                        format!("accept:{i}"),
-                        frame.parent.is_some() && self.check.fair,
-                    )
-                }
-                Phase::Ready(pc) => {
-                    let (description, span) = self.resume(&mut next, i, *pc)?;
-                    (
-                        description,
-                        span,
-                        format!("resume:{i}:{pc}"),
-                        self.check.fair,
-                    )
-                }
-                Phase::Waiting {
-                    child,
-                    bind,
-                    next: pc,
-                    pc: origin,
-                } => {
-                    let callee = &s.frames[*child];
-                    if !matches!(callee.phase, Phase::Done) {
-                        continue;
-                    }
-                    let Value::Variant(tag, values) = &callee.response else {
-                        return Err(Error::new(
-                            self.code[*origin].span,
-                            "internal: missing call response",
-                        ));
-                    };
-                    if tag != "Some" || values.len() != 1 {
-                        return Err(Error::new(
-                            self.code[*origin].span,
-                            "internal: invalid call response",
-                        ));
-                    }
-                    let result = values[0].clone();
-                    if let Some(n) = bind {
-                        next.frames[i].env.insert(n.clone(), result.clone());
-                    }
-                    next.frames[i].phase = Phase::Ready(*pc);
-                    (
-                        format!("request #{i} receives reply {result} from request #{child}"),
-                        self.code[*origin].span,
-                        format!("reply:{i}:{child}:{origin}"),
-                        self.check.fair,
-                    )
-                }
-                Phase::Pending {
-                    table,
-                    method,
-                    args,
-                    bind,
-                    next: pc,
-                    pc: origin,
-                } => {
-                    let result = self.operation(table, method, args, &mut next);
-                    if let Some(n) = bind {
-                        next.frames[i].env.insert(n.clone(), result.clone());
-                    }
-                    next.frames[i].phase = Phase::Ready(*pc);
-                    (
-                        format!("request #{i}: {table}.{method} completes with {result}"),
-                        self.code[*origin].span,
-                        format!("complete:{i}:{origin}"),
-                        self.check.fair,
-                    )
-                }
-                Phase::Done => continue,
-            };
-            steps.push(Step {
-                action: Action {
-                    id,
-                    description,
-                    span,
-                    fair,
-                },
-                state: next,
-            });
-        }
-        Ok(steps)
-    }
-    fn resume(&self, s: &mut State, i: usize, mut pc: usize) -> Result<(String, Span)> {
-        // Function call graphs are acyclic and have a checked expansion budget.
-        for _ in 0..=20_000 {
-            let code = &self.code[pc];
-            match &code.instruction {
-                Instruction::End | Instruction::Return(_) => {
-                    let value = if let Instruction::Return(expr) = &code.instruction {
-                        self.eval(expr, &s.frames[i].env, s)?
-                    } else {
-                        Value::Unit
-                    };
-                    self.check_value(&value, code.span)?;
-                    if let Some(continuation) = s.frames[i].stack.pop() {
-                        s.frames[i].env = continuation.env;
-                        if let Some(name) = continuation.bind {
-                            s.frames[i].env.insert(name, value);
-                        }
-                        pc = continuation.next;
-                    } else {
-                        s.frames[i].phase = Phase::Done;
-                        s.frames[i].response = Value::some(value.clone());
-                        let verb = if self.check.semantics == "cf-core-v0" {
-                            "responds"
-                        } else {
-                            "returns"
-                        };
-                        return Ok((format!("request #{i} {verb} {value}"), code.span));
-                    }
-                }
-                Instruction::Match { value, arms } => {
-                    let v = self.eval(value, &s.frames[i].env, s)?;
-                    let mut matched = None;
-                    for (pat, target) in arms {
-                        let mut env = s.frames[i].env.clone();
-                        if bind_pattern(pat, &v, &mut env) {
-                            matched = Some((*target, env));
-                            break;
-                        }
-                    }
-                    let Some((target, env)) = matched else {
-                        return Err(Error::new(
-                            code.span,
-                            "internal: non-exhaustive lowered match",
-                        ));
-                    };
-                    s.frames[i].env = env;
-                    pc = target;
-                }
-                Instruction::Let { value, next, .. } | Instruction::Eval { value, next } => {
-                    let bind = if let Instruction::Let { name, .. } = &code.instruction {
-                        Some(name.clone())
-                    } else {
-                        None
-                    };
-                    if let ExprKind::Call(f, args) = &value.kind {
-                        let path = f.path().unwrap_or_default();
-                        if path == "call" {
-                            let static_target = actor_target(&args[0])
-                                .filter(|(target, _)| self.handlers.contains_key(target));
-                            let (handler, key) = if let Some((handler, key_expr)) = static_target {
-                                let key = key_expr
-                                    .as_ref()
-                                    .map(|e| self.eval(e, &s.frames[i].env, s))
-                                    .transpose()?;
-                                (handler, key)
-                            } else if let ExprKind::Field(receiver, method) = &args[0].kind {
-                                let Value::Address(actor, key) =
-                                    self.eval(receiver, &s.frames[i].env, s)?
-                                else {
-                                    return Err(Error::new(
-                                        value.span,
-                                        "internal: call requires an address",
-                                    ));
-                                };
-                                (format!("{actor}.{method}"), Some(*key))
-                            } else {
-                                return Err(Error::new(value.span, "internal: invalid actor call"));
-                            };
-                            if let Some(key) = &key {
-                                self.check_value(key, value.span)?;
-                                if !s.keyed_actors[&self.handlers[&handler].actor].contains_key(key)
-                                {
-                                    return Err(Error::new(
-                                        value.span,
-                                        "LIMIT: actor key outside finite identity domain",
-                                    ));
-                                }
-                            }
-                            let message = self.eval(&args[1], &s.frames[i].env, s)?;
-                            self.check_value(&message, value.span)?;
-                            if s.frames.len() >= 64 {
-                                return Err(Error::new(
-                                    value.span,
-                                    "LIMIT: actor call frame capacity (64 total frames)",
-                                ));
-                            }
-                            let child = s.frames.len();
-                            s.frames.push(Frame {
-                                handler: handler.clone(),
-                                key: key.clone(),
-                                parent: Some(i),
-                                input: message.clone(),
-                                env: Env::new(),
-                                phase: Phase::Unaccepted,
-                                response: Value::none(),
-                                stack: vec![],
-                            });
-                            s.frames[i].phase = Phase::Waiting {
-                                child,
-                                bind,
-                                next: *next,
-                                pc,
-                            };
-                            return Ok((
-                                format!(
-                                    "request #{i} calls {}({message}) as request #{child}",
-                                    key.map_or(handler.clone(), |key| format!(
-                                        "{}.at({key}).{}",
-                                        self.handlers[&handler].actor,
-                                        handler.rsplit('.').next().unwrap_or_default()
-                                    ))
-                                ),
-                                value.span,
-                            ));
-                        }
-                        if let Some(function) = self.functions.get(&path)
-                            && self.effects[&path].suspends_or_writes()
-                        {
-                            let values = args
-                                .iter()
-                                .map(|e| self.eval(e, &s.frames[i].env, s))
-                                .collect::<Result<Vec<_>>>()?;
-                            for v in &values {
-                                self.check_value(v, value.span)?;
-                            }
-                            let locals = function
-                                .params
-                                .iter()
-                                .zip(values)
-                                .map(|((name, _), v)| (name.clone(), v))
-                                .collect();
-                            let saved = std::mem::replace(&mut s.frames[i].env, locals);
-                            s.frames[i].stack.push(Continuation {
-                                env: saved,
-                                bind,
-                                next: *next,
-                            });
-                            pc = self.entries[&path];
-                            continue;
-                        }
-                        if let ExprKind::Field(receiver, method) = &f.kind
-                            && method == "set"
-                        {
-                            let capability = self.eval(receiver, &s.frames[i].env, s)?;
-                            let updated = self.eval(&args[0], &s.frames[i].env, s)?;
-                            self.check_value(&updated, value.span)?;
-                            match capability {
-                                Value::Actor(actor) => {
-                                    s.actors.insert(actor, updated);
-                                }
-                                Value::KeyedActor(actor, key) => {
-                                    s.keyed_actors
-                                        .get_mut(&actor)
-                                        .expect("validated actor")
-                                        .insert(*key, updated);
-                                }
-                                _ => {
-                                    return Err(Error::new(
-                                        value.span,
-                                        "internal: set without an actor capability",
-                                    ));
-                                }
-                            }
-                            if let Some(name) = bind {
-                                s.frames[i].env.insert(name, Value::Unit);
-                            }
-                            pc = *next;
-                            continue;
-                        }
-                        if let Some((table, method)) = path.rsplit_once('.')
-                            && self.tables.contains_key(table)
-                        {
-                            let args = args
-                                .iter()
-                                .map(|x| self.eval(x, &s.frames[i].env, s))
-                                .collect::<Result<Vec<_>>>()?;
-                            for v in &args {
-                                self.check_value(v, value.span)?;
-                            }
-                            s.frames[i].phase = Phase::Pending {
-                                table: table.into(),
-                                method: method.into(),
-                                args: args.clone(),
-                                bind,
-                                next: *next,
-                                pc,
-                            };
-                            return Ok((
-                                format!(
-                                    "request #{i} issues {path}({})",
-                                    args.iter()
-                                        .map(ToString::to_string)
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                ),
-                                value.span,
-                            ));
-                        }
-                    }
-                    let v = self.eval(value, &s.frames[i].env, s)?;
-                    self.check_value(&v, value.span)?;
-                    if let Some(n) = bind {
-                        s.frames[i].env.insert(n, v);
-                    }
-                    pc = *next;
-                }
-            }
-        }
-        Err(Error::new(
-            Span::default(),
-            "LIMIT: local computation exceeded the actor spike's step budget",
-        ))
     }
 }
 pub(crate) fn bind_pattern(p: &Pattern, v: &Value, env: &mut Env) -> bool {
@@ -1235,10 +629,11 @@ pub(crate) fn bind_pattern(p: &Pattern, v: &Value, env: &mut Env) -> bool {
             true
         }
         Pattern::Variant(n, ps) => {
-            if let Value::Variant(tag, xs) = v {
-                tag == n
-                    && ps.len() == xs.len()
-                    && ps.iter().zip(xs).all(|(p, v)| bind_pattern(p, v, env))
+            if let Value::Variant(m, vs) = v
+                && n == m
+                && ps.len() == vs.len()
+            {
+                ps.iter().zip(vs).all(|(p, v)| bind_pattern(p, v, env))
             } else {
                 false
             }

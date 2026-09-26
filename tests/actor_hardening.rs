@@ -9,8 +9,8 @@ actor A {
   init(): Bool { false }
   handle_message(state: Bool, msg: Msg): Bool { true }
 }
-invariant "state has a Boolean type" { A.state || !A.state }
-check C { semantics = "actors-v2" mailbox_bound = 1 inputs { once send(A, Ping) } fairness { weak runtime.progress } }
+property "state has a Boolean type" { always (A.state || !A.state) }
+check C { mailbox_bound = 1 inputs { once send(A, Ping) } fairness { weak runtime.progress } }
 "#;
 
 #[test]
@@ -68,7 +68,7 @@ fn pratt_chains_and_combined_helper_nesting_are_bounded() {
 }
 
 #[test]
-fn v2_does_not_allow_owner_capabilities_or_inspection_to_escape() {
+fn behavior_cannot_access_state_capabilities_or_inspection() {
     for declaration in [
         "type Leak = Leak(Actor<Bool>)",
         "type Leak = Leak { hidden: Option<Actor<Bool>> }",
@@ -151,9 +151,9 @@ actor Z(id: Key) {
   handle_message(state: Bool, msg: Msg): Bool { true }
 }
 property "input is processed" { forall (i in inputs(A)) { i.submitted leads_to Z.at(Right).state } }
-invariant "left remains isolated" { !Z.at(Left).state }
-cover "address-bearing domain is finite" { exists (r in Routes) { r == Route(Z.at(Right)) } }
-check C { semantics = "actors-v2" mailbox_bound = 1 inputs { once send(A, Ping) } fairness { weak runtime.progress } }
+property "left remains isolated" { always (!Z.at(Left).state) }
+property "address-bearing domain is finite" { reachable (exists (r in Routes) { r == Route(Z.at(Right)) }) }
+check C { mailbox_bound = 1 inputs { once send(A, Ping) } fairness { weak runtime.progress } }
 "#;
     let p = compile(source, None).unwrap();
     let report = checker::check(source, &p, &Options::default()).unwrap();

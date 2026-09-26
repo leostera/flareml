@@ -1,61 +1,38 @@
-//! Keep the scenario guide's inventory and advertised outcomes executable.
 use flareml::{
     checker::{self, Options, Status},
     compile,
 };
-use std::{collections::BTreeSet, fs};
-
+use std::collections::BTreeSet;
 #[test]
-fn scenario_examples_keep_their_profiles_verdicts_and_replay() {
-    let scenarios = [
-        ("counter-replies.fml", "actors-v2", Status::VerifiedInScope),
-        ("missing-reply.fml", "actors-v2", Status::Violated),
-        (
-            "eligibility-check.fml",
-            "actors-v0",
-            Status::VerifiedInScope,
-        ),
-        ("counter-bound.fml", "actors-v0", Status::Violated),
-        ("forwarded-counter.fml", "actors-v1", Status::Violated),
-        (
-            "isolated-accounts.fml",
-            "actors-v1",
-            Status::VerifiedInScope,
-        ),
-        ("routed-deposits.fml", "actors-v1", Status::VerifiedInScope),
-        ("lost-update-across-call.fml", "actors-v1", Status::Violated),
-        ("login-bug.fml", "cf-core-v0", Status::Violated),
-        ("login-fixed.fml", "cf-core-v0", Status::VerifiedInScope),
-        ("lost-update.fml", "cf-core-v0", Status::Violated),
-        ("starvation.fml", "cf-core-v0", Status::Violated),
+fn every_scenario_has_a_checked_verdict_and_replay() {
+    let fixtures = [
+        ("counter-replies.fml", Status::VerifiedInScope),
+        ("missing-reply.fml", Status::Violated),
+        ("sequential-workflow.fml", Status::VerifiedInScope),
+        ("lost-update.fml", Status::Violated),
+        ("atomic-increments.fml", Status::VerifiedInScope),
+        ("routed-deposits.fml", Status::VerifiedInScope),
+        ("eligibility-check.fml", Status::VerifiedInScope),
     ];
-    let actual: BTreeSet<_> = fs::read_dir("examples")
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let actual: BTreeSet<_> = std::fs::read_dir(&root)
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name.ends_with(".fml"))
-        .collect();
-    let expected: BTreeSet<_> = scenarios
-        .iter()
-        .map(|(name, _, _)| name.to_string())
+        .filter(|n| n.ends_with(".fml"))
         .collect();
     assert_eq!(
-        actual, expected,
-        "update the scenario guide and acceptance matrix when adding examples"
+        actual,
+        fixtures.iter().map(|(n, _)| (*n).to_owned()).collect(),
+        "new examples must declare an expected verdict"
     );
-    let guide = fs::read_to_string("examples/README.md").unwrap();
-    for (name, profile, status) in scenarios {
-        assert!(
-            guide.contains(&format!("]({name})")),
-            "missing scenario guide entry: {name}"
-        );
-        let source = fs::read_to_string(format!("examples/{name}")).unwrap();
-        let program = compile(&source, None).unwrap();
-        assert_eq!(program.check.semantics, profile, "{name}");
-        let report = checker::check(&source, &program, &Options::default()).unwrap();
-        assert_eq!(report.status, status, "{name}");
-        for claim in &report.claims {
-            if let Some(witness) = &claim.witness {
-                witness.validate(&source, &program).unwrap();
+    for (name, expected) in fixtures {
+        let source = std::fs::read_to_string(root.join(name)).unwrap();
+        let p = compile(&source, None).unwrap();
+        let r = checker::check(&source, &p, &Options::default()).unwrap();
+        assert_eq!(r.status, expected, "{name}");
+        for c in r.claims {
+            if let Some(trace) = c.witness {
+                trace.validate(&source, &p).unwrap();
             }
         }
     }

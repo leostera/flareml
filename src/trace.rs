@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
+/// Only this artifact layout/meaning is supported; older traces must be regenerated.
+pub const FORMAT_VERSION: u32 = 6;
+
 pub fn source_hash(source: &str) -> String {
     format!("{:x}", Sha256::digest(source.as_bytes()))
 }
@@ -18,7 +21,6 @@ pub fn source_hash(source: &str) -> String {
 pub struct Trace {
     pub format_version: u32,
     pub tool_version: String,
-    pub semantics: String,
     pub source_hash: String,
     pub check: String,
     pub claim: String,
@@ -52,13 +54,8 @@ impl Trace {
             trace_states.push(states[g.edges[s][e].to].clone());
         }
         Self {
-            format_version: if p.check.semantics == "actors-v2" {
-                5
-            } else {
-                3
-            },
+            format_version: FORMAT_VERSION,
             tool_version: env!("CARGO_PKG_VERSION").into(),
-            semantics: p.check.semantics.clone(),
             source_hash: source_hash(source),
             check: p.check.name.clone(),
             claim: claim.name.clone(),
@@ -74,22 +71,16 @@ impl Trace {
     }
     pub fn validate(&self, source: &str, p: &Program) -> Result<()> {
         let bad = |s: &str| Error::new(Span::default(), format!("invalid trace: {s}"));
-        let version = if p.check.semantics == "actors-v2" {
-            5
-        } else {
-            3
-        };
-        if self.format_version != version || self.tool_version != env!("CARGO_PKG_VERSION") {
+        if self.format_version != FORMAT_VERSION || self.tool_version != env!("CARGO_PKG_VERSION") {
             return Err(bad("unsupported format/tool version"));
         }
         if self.source_hash != source_hash(source)
             || self.check != p.check.name
-            || self.semantics != p.check.semantics
             || self.weak_progress != p.check.fair
             || self.mailbox_bound != p.check.mailbox_bound
             || self.message_bound != p.check.message_bound
         {
-            return Err(bad("model, check, profile, or fairness mismatch"));
+            return Err(bad("model, check, bounds, or fairness mismatch"));
         }
         if self.states.is_empty()
             || self.states.len() != self.actions.len() + 1

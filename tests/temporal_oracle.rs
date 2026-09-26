@@ -103,8 +103,153 @@ fn oracle(g: &Graph, kind: Kind, p: &[bool], q: &[bool]) -> bool {
     }
     false
 }
+const KINDS: [Kind; 7] = [
+    Kind::Always,
+    Kind::Eventually,
+    Kind::Response,
+    Kind::Until,
+    Kind::Recurrence,
+    Kind::Stabilization,
+    Kind::Persistence,
+];
+
+fn graph(adjacency: u8, fair: u8) -> Graph {
+    let mut g = Graph {
+        edges: vec![vec![], vec![]],
+    };
+    for i in 0..2 {
+        g.edges[i].push(Edge {
+            to: i,
+            action: "idle".into(),
+            fair: false,
+        });
+        for j in 0..2 {
+            if adjacency & (1 << (2 * i + j)) != 0 {
+                g.edges[i].push(Edge {
+                    to: j,
+                    action: format!("work:{i}"),
+                    fair: fair & (1 << i) != 0,
+                });
+            }
+        }
+    }
+    g
+}
+
+// Validate produced evidence independently of SCC selection: edge continuity,
+// fairness in the original graph, and fixed-point temporal interpretation.
+fn validate_walk(g: &Graph, kind: Kind, p: &[bool], q: &[bool], w: &flareml::graph::Walk) {
+    use flareml::{
+        semantics::{Env, State, Value},
+        syntax, temporal,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut current = 0;
+    assert_eq!(w.start, current);
+    let mut visited = vec![current];
+    for &(from, edge) in &w.steps {
+        assert_eq!(from, current);
+        current = g.edges[from][edge].to;
+        visited.push(current);
+    }
+    if let Some(start) = w.loop_start {
+        assert!(start < w.steps.len());
+        assert_eq!(visited[start], current);
+        let actions: BTreeSet<_> = g
+            .edges
+            .iter()
+            .flatten()
+            .filter(|e| e.fair)
+            .map(|e| &e.action)
+            .collect();
+        for action in actions {
+            if visited[start..w.steps.len()]
+                .iter()
+                .all(|&v| g.edges[v].iter().any(|e| e.fair && &e.action == action))
+            {
+                assert!(
+                    w.steps[start..]
+                        .iter()
+                        .any(|&(v, i)| g.edges[v][i].fair && &g.edges[v][i].action == action)
+                );
+            }
+        }
+        visited.pop();
+    }
+    let formula = match kind {
+        Kind::Always => "always P.state",
+        Kind::Eventually => "eventually P.state",
+        Kind::Response => "P.state leads_to Q.state",
+        Kind::Until => "P.state until Q.state",
+        Kind::Recurrence => "always eventually P.state",
+        Kind::Stabilization => "eventually always P.state",
+        Kind::Persistence => "always (P.state implies always Q.state)",
+    };
+    let source = format!(
+        "actor P {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ s }} }} actor Q {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ s }} }} property \"p\" {{ {formula} }} check C {{ mailbox_bound = 1 }}"
+    );
+    let expression = syntax::parse(&source).unwrap().claims[0].body.clone();
+    let program = flareml::compile(&source, None).unwrap();
+    let states: Vec<_> = visited
+        .iter()
+        .map(|&v| State {
+            actors: BTreeMap::from([
+                ("P".into(), Value::Bool(p[v])),
+                ("Q".into(), Value::Bool(q[v])),
+            ]),
+            ..State::default()
+        })
+        .collect();
+    assert!(
+        !temporal::on_trace(&program, &states, w.loop_start, &expression, &Env::new()).unwrap()
+    );
+}
+
+#[test]
+fn exhaust_all_two_state_graphs_predicates_and_fairness() {
+    for adjacency in 0..16 {
+        for fair in 0..4 {
+            let g = graph(adjacency, fair);
+            for pred in 0..4 {
+                for consequent in 0..4 {
+                    let p: Vec<_> = (0..2).map(|i| pred & (1 << i) != 0).collect();
+                    let q: Vec<_> = (0..2).map(|i| consequent & (1 << i) != 0).collect();
+                    for kind in KINDS {
+                        let result =
+                            counterexample(&g, kind, &p, &q, &Budget::new(Duration::from_secs(5)))
+                                .unwrap();
+                        assert_eq!(
+                            result.is_some(),
+                            oracle(&g, kind, &p, &q),
+                            "{kind:?} {adjacency} {fair} {pred} {consequent}"
+                        );
+                        if let Some(w) = result {
+                            validate_walk(&g, kind, &p, &q, &w);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
+    #[test]
+    fn three_state_graphs_with_shared_action_ids(
+        edges in prop::collection::vec((0usize..3, 0usize..3, 0u8..3, any::<bool>()), 0..7),
+        pred in 0u8..8, consequent in 0u8..8
+    ) {
+        let mut g = Graph { edges: (0..3).map(|i| vec![Edge { to: i, action: "idle".into(), fair: false }]).collect() };
+        for (from, to, action, fair) in edges { g.edges[from].push(Edge { to, action: format!("a:{action}"), fair }); }
+        let p: Vec<_> = (0..3).map(|i| pred & (1 << i) != 0).collect();
+        let q: Vec<_> = (0..3).map(|i| consequent & (1 << i) != 0).collect();
+        for kind in KINDS {
+            let result = counterexample(&g, kind, &p, &q, &Budget::new(Duration::from_secs(5))).unwrap();
+            prop_assert_eq!(result.is_some(), oracle(&g, kind, &p, &q), "{:?}; {:?}", kind, g.edges);
+            if let Some(w) = result { validate_walk(&g, kind, &p, &q, &w); }
+        }
+    }
     #[test]
     fn native_agrees_with_recurrent_subset_oracle(adjacency in 0u8..16, fair in 0u8..4, pred in 0u8..4, consequent in 0u8..4){
         let mut g=Graph{edges:vec![vec![],vec![]]};

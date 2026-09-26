@@ -33,10 +33,9 @@ property "a waiting client eventually receives its reply" {
 property "counter messages do finish processing" {
   forall (m in messages(Counter)) { m.sent leads_to m.processed }
 }
-cover "the counter commits" { Counter.state == 1 }
+property "the counter commits" { reachable (Counter.state == 1) }
 
 check MissingReply {
-  semantics = "actors-v2"
   domain Int = 0..1
   mailbox_bound = 1
   message_bound = 1
