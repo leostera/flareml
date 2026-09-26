@@ -7,7 +7,7 @@ actor Client(id: ClientId) {
   init(id: ClientId): ClientState { ClientState { me: Client.at(id), done: false } }
   handle_message(state: ClientState, message: ClientMessage): ClientState {
     match message {
-      | Start -> { send(Store, Increment(state.me)) state }
+      | Start -> { send(Store, Increment(state.me)); state }
       | Ack -> ClientState { me: state.me, done: true }
     }
   }
@@ -15,7 +15,7 @@ actor Client(id: ClientId) {
 actor Store {
   init(): Int { 0 }
   handle_message(state: Int, message: StoreMessage): Int {
-    match message { | Increment(reply_to) -> { send(reply_to, Ack) state + 1 } }
+    match message { | Increment(reply_to) -> { send(reply_to, Ack); state + 1 } }
   }
 }
 property "two completed increments retain both updates" {

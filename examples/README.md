@@ -1,6 +1,6 @@
 # Modeling scenarios
 
-All examples use the same current language and FIFO/atomic-turn execution contract. No semantics selector or legacy syntax exists.
+All examples use the same current language and FIFO/atomic-turn execution contract. No semantics selector or legacy syntax exists. Bindings and intermediate statements require semicolons (`send(target, message); next_state`); the final unterminated expression supplies the block's value.
 
 | Example | Question | Expected result |
 | --- | --- | --- |

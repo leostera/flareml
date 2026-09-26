@@ -9,7 +9,7 @@ actor Client {
   handle_message(state: ClientState, message: ClientMessage): ClientState {
     match message {
       | Start -> {
-          send(Counter, Inc(Client))
+          send(Counter, Inc(Client));
           Waiting
         }
       | Counted(_) -> Finished

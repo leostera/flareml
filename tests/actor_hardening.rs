@@ -96,7 +96,7 @@ fn match_and_return_typing_are_exhaustive() {
     for source in [
         BASE.replace("Msg = Ping", "Msg = Ping | Pong")
             .replace("{ true }", "{ match msg { | Ping -> true } }"),
-        BASE.replace("{ true }", "{ let next = true }"),
+        BASE.replace("{ true }", "{ let next = true; }"),
         BASE.replace("{ true }", "{ match msg { | Ping -> () } }"),
         BASE.replace("init(): Bool { false }", "init(): Bool { A.state }"),
         BASE.replace("init(): Bool { false }", "init(args: Bool): Bool { args }"),
@@ -144,7 +144,7 @@ type Msg = Ping
 type Routes = Route(Actor<Z>)
 actor A {
   init(): Actor<Z> { Z.at(Right) }
-  handle_message(state: Actor<Z>, msg: Msg): Actor<Z> { send(state, msg) state }
+  handle_message(state: Actor<Z>, msg: Msg): Actor<Z> { send(state, msg); state }
 }
 actor Z(id: Key) {
   init(key: Key): Bool { false }

@@ -10,6 +10,7 @@ Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 - [x] No `semantics` selector, legacy parser/profile dispatch, Worker/D1 primitives, owner capabilities, synchronous calls, continuation frames, or old trace readers.
 - [x] Shared local statement evaluator for pure functions and message turns; only turns receive an outbox.
 - [x] Stable Rust toolchain and normal CI; clap-derived CLI.
+- [x] Required semicolons for bindings and intermediate statements; unterminated tail values, terminated-tail `unit`, explicit match-arm separators, and no whitespace-only sequencing. Manually migrated examples/fixtures; regressions cover parenthesized tails after sends and Result-discard rejection.
 - [x] Current-only examples for sequential computation, eligibility policy, replies, missing replies, routed accounts, lost updates, and their atomic repair.
 
 ### Property surface

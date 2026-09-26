@@ -13,8 +13,8 @@ actor Counter(id: CounterId) {
   handle_message(state: Int, message: CounterMessage): Int {
     match message {
       | Inc(reply_to, request_id) -> {
-          let next = state + 1
-          send(reply_to, Counted(request_id, next))
+          let next = state + 1;
+          send(reply_to, Counted(request_id, next));
           next
         }
     }

@@ -12,11 +12,11 @@ actor Client(id: ClientId) {
   handle_message(state: ClientState, message: ClientMessage): ClientState {
     match message {
       | Start -> {
-          send(Store, Read(state.me))
+          send(Store, Read(state.me));
           ClientState { me: state.me, phase: Reading }
         }
       | ReadValue(value) -> {
-          send(Store, Write(state.me, value + 1))
+          send(Store, Write(state.me, value + 1));
           ClientState { me: state.me, phase: Writing }
         }
       | Ack -> ClientState { me: state.me, phase: Done }
@@ -27,8 +27,8 @@ actor Store {
   init(): Int { 0 }
   handle_message(state: Int, message: StoreMessage): Int {
     match message {
-      | Read(reply_to) -> { send(reply_to, ReadValue(state)) state }
-      | Write(reply_to, value) -> { send(reply_to, Ack) value }
+      | Read(reply_to) -> { send(reply_to, ReadValue(state)); state }
+      | Write(reply_to, value) -> { send(reply_to, Ack); value }
     }
   }
 }

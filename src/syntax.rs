@@ -576,8 +576,29 @@ impl Parser {
         self.expect("{")?;
         let mut stmts = vec![];
         while !self.eat("}") {
-            stmts.push(self.stmt()?);
-            self.eat(";");
+            let statement = self.stmt()?;
+            let binding = matches!(statement.kind, StmtKind::Let(..));
+            stmts.push(statement);
+            let separator = self.token().span;
+            if self.eat(";") {
+                if self.at("}") {
+                    // A terminated tail discards its value. Lower it to an
+                    // explicit unit tail shared by typing and evaluation.
+                    stmts.push(Stmt {
+                        kind: StmtKind::Expr(Expr {
+                            kind: ExprKind::Unit,
+                            span: separator,
+                        }),
+                        span: separator,
+                    });
+                }
+            } else if binding || !self.at("}") {
+                let end = self.tokens[self.i - 1].span.end;
+                return Err(Error::new(
+                    Span { start: end, end },
+                    "expected `;` after statement (only a final value may omit it)",
+                ));
+            }
         }
         self.depth -= 1;
         Ok(stmts)
@@ -594,16 +615,21 @@ impl Parser {
             self.expect("{")?;
             let mut arms = vec![];
             while !self.eat("}") {
-                self.eat("|");
+                if arms.is_empty() {
+                    self.eat("|");
+                } else {
+                    self.expect("|")?;
+                }
                 let p = self.pattern()?;
                 self.expect("->")?;
                 let body = if self.at("{") {
                     self.block()?
+                } else if self.at("let") {
+                    return self.err("a match arm with a binding requires a braced block");
                 } else {
                     vec![self.stmt()?]
                 };
                 arms.push((p, body));
-                self.eat(";");
             }
             StmtKind::Match(e, arms)
         } else {

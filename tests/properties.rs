@@ -80,7 +80,7 @@ fn discovered_bad_state_is_not_hidden_by_a_sibling_search_cutoff() {
 fn safety_checks_reachable_states_before_later_capacity_cutoff() {
     let source = BASE
         .replace("CLAIM", "property \"safe\" { always (!Machine.state) }")
-        .replace("{ true }", "{ send(Machine, Tick) true }")
+        .replace("{ true }", "{ send(Machine, Tick); true }")
         .replace("mailbox_bound = 1", "mailbox_bound = 1 message_bound = 2");
     let p = compile(&source, None).unwrap();
     let r = checker::check(&source, &p, &Options::default()).unwrap();

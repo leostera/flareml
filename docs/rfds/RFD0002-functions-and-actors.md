@@ -33,7 +33,7 @@ let increment = (value: Int): Int { value + 1 }
 
 Closed variants and records describe data. Built-ins are `Bool`, `Int`, `String`, `unit`, `Option<T>`, `Result<T, E>`, and `Actor<ActorName>`. The latter is a typed reference to a declared actor, not an owned-state capability. Transparent named aliases are supported; user-defined generics and recursive data are not.
 
-Functions use typed parameters and an explicit return type (omitting the type means `unit`). The final expression or exhaustive tail match is the result. Blocks contain `let` bindings, expression statements, and `match`. Branch-local bindings do not leak. Shadowing globals/locals, recursive local calls, non-exhaustive matches, nested constructor patterns, and record-destructuring patterns are rejected. Match a payload in a second match or bind a record and inspect fields instead.
+Functions use typed parameters and an explicit return type (omitting the type means `unit`). The final unterminated expression or exhaustive tail match is the result. Blocks contain `let` bindings, expression statements, and `match`. Every `let` binding and every non-tail statement requires `;`, including a non-tail `match`. A terminated final expression discards its value and makes the block return `unit`; an empty block also returns `unit`. Match arms are separated by `|`, not semicolons; use a braced block for multiple statements within an arm. Whitespace/newlines alone do not separate statements. Branch-local bindings do not leak. Shadowing globals/locals, recursive local calls, non-exhaustive matches, nested constructor patterns, and record-destructuring patterns are rejected. Match a payload in a second match or bind a record and inspect fields instead.
 
 Result bindings must be matched immediately with explicit `Ok` and `Err` cases; wildcard disposal is rejected. Pure helpers, send helpers, and specification inspection are separated by conservative transitive effects. Send helpers can be called only as direct statements or bindings, not hidden inside arguments, records, constructors, or predicates.
 
@@ -49,8 +49,8 @@ actor Counter(id: AccountId) {
   handle_message(state: Int, message: Request): Int {
     match message {
       | Increment(reply_to, request_id) -> {
-          let next = increment(state)
-          send(reply_to, Counted(request_id, next))
+          let next = increment(state);
+          send(reply_to, Counted(request_id, next));
           next
         }
     }

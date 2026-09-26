@@ -61,7 +61,7 @@ fn boolean_transition_tables_temporal_classification_and_replay() {
                     ),
                 ] {
                     let source = format!(
-                        "actor A {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ let result = ((s && {}) || (!s && {})) send(A, ()) result }} }} property \"p\" {{ {formula} }} check C {{ mailbox_bound = 1 inputs {{ once send(A, ()) }} {} }}",
+                        "actor A {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ let result = ((s && {}) || (!s && {})); send(A, ()); result }} }} property \"p\" {{ {formula} }} check C {{ mailbox_bound = 1 inputs {{ once send(A, ()) }} {} }}",
                         next[1],
                         next[0],
                         if fair {

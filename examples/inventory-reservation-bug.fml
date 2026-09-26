@@ -10,8 +10,8 @@ actor Buyer(id: BuyerId) {
   init(id: BuyerId): BuyerState { BuyerState { me: Buyer.at(id), outcome: Waiting } }
   handle_message(state: BuyerState, message: BuyerMessage): BuyerState {
     match message {
-      | Start -> { send(Inventory, Probe(state.me)) state }
-      | Offer -> { send(Inventory, Commit(state.me)) state }
+      | Start -> { send(Inventory, Probe(state.me)); state }
+      | Offer -> { send(Inventory, Commit(state.me)); state }
       | Accepted -> BuyerState { me: state.me, outcome: Won }
       | Rejected -> BuyerState { me: state.me, outcome: Lost }
     }
@@ -23,11 +23,11 @@ actor Inventory {
     match message {
       | Probe(buyer) -> {
           match stock {
-            | Available -> { send(buyer, Offer) Available }
-            | Reserved -> { send(buyer, Rejected) Reserved }
+            | Available -> { send(buyer, Offer); Available }
+            | Reserved -> { send(buyer, Rejected); Reserved }
           }
         }
-      | Commit(buyer) -> { send(buyer, Accepted) Reserved }
+      | Commit(buyer) -> { send(buyer, Accepted); Reserved }
     }
   }
 }

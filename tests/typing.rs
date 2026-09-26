@@ -33,7 +33,7 @@ fn result_wildcards_and_ignored_bindings_cannot_silently_discard_errors() {
     for body in [
         "let result = outcome(); match result { | _ -> () }",
         "let result = outcome(); ()",
-        "match msg { | _ -> outcome() } ()",
+        "match msg { | _ -> outcome() }; ()",
     ] {
         let source = model(&format!(
             "let outcome = (): Result<Bool, Bool> {{ Ok(true) }} actor API {{ handle_message(msg: unit): unit {{ {body} }} }}"
@@ -61,7 +61,7 @@ fn tail_match_requires_every_branch_to_return_expected_type() {
     for body in [
         "match msg { | Some(x) -> true | None -> () }",
         "match msg { | Some(x) -> true }",
-        "match msg { | Some(x) -> true | None -> let x = false }",
+        "match msg { | Some(x) -> true | None -> { let x = false; } }",
     ] {
         assert!(compile(&model(&format!("actor API {{ init(): Bool {{ false }} handle_message(state: Bool, msg: Option<Bool>): Bool {{ {body} }} }}")), None).is_err());
     }
@@ -86,8 +86,8 @@ actor Counter {
   handle_message(state: Int, message: unit): Int { state + 1 }
 }
 let bounded = (): Bool {
-  let current = Counter.state
-  let small = current <= 1
+  let current = Counter.state;
+  let small = current <= 1;
   small
 }
 property "safe" { always bounded() }

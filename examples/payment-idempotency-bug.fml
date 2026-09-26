@@ -18,7 +18,7 @@ actor Gateway {
 actor Processor(id: PaymentId) {
   init(id: PaymentId): PaymentState { PaymentState { ledger: Fresh, charges: 0, deliveries: 0 } }
   handle_message(state: PaymentState, request: Debit): PaymentState {
-    send(Gateway, Receipt)
+    send(Gateway, Receipt);
     PaymentState { ledger: Recorded, charges: state.charges + 1, deliveries: state.deliveries + 1 }
   }
 }

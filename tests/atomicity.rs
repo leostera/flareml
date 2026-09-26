@@ -8,8 +8,8 @@ type Message = Start | First | Second
 actor Sender {
   init(): Bool { false }
   handle_message(state: Bool, message: Message): Bool {
-    send(Target, First)
-    send(Target, Second)
+    send(Target, First);
+    send(Target, Second);
     true
   }
 }
@@ -80,7 +80,7 @@ actor A {
   init(): Int { 0 }
   handle_message(state: Int, msg: Message): Int {
     match msg {
-      | Start -> { send(A, Finish) state + 1 }
+      | Start -> { send(A, Finish); state + 1 }
       | Finish -> state + 1
     }
   }
@@ -96,8 +96,8 @@ check C { domain Int = 0..2 mailbox_bound = 1 inputs { once send(A, Start) } fai
 }
 #[test]
 fn nested_send_helpers_preserve_source_order_and_branch_scoping() {
-    let source = SOURCE.replace("actor Sender {", "let last = (): unit { send(Target, Second) }\nlet notify = (): unit { send(Target, First) last() }\nactor Sender {")
-        .replace("send(Target, First)\n    send(Target, Second)", "notify()")
+    let source = SOURCE.replace("actor Sender {", "let last = (): unit { send(Target, Second) }\nlet notify = (): unit { send(Target, First); last() }\nactor Sender {")
+        .replace("send(Target, First);\n    send(Target, Second);", "notify();")
         .replace("mailbox_bound = 1", "mailbox_bound = 2 message_bound = 2");
     let p = compile(&source, None).unwrap();
     let r = checker::check(&source, &p, &Options::default()).unwrap();

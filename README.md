@@ -31,7 +31,10 @@ type Message = Increment
 
 actor Counter {
   init(): Int { 0 }
-  handle_message(state: Int, message: Message): Int { state + 1 }
+  handle_message(state: Int, message: Message): Int {
+    let next = state + 1;
+    next
+  }
 }
 
 property "one increment stays bounded" { always (Counter.state <= 1) }
@@ -51,7 +54,7 @@ check OneIncrement {
 - A singleton name is its address. `actor Account(id: AccountId)` creates one identity per finite key; use `Account.at(Alice)` and `Actor<Account>`. `Actor<T>` is a typed reference for sending messages, not a mutable state handle.
 - `init` is pure. A stateful handler takes a state value and a message, and returns the next state. Stateless actors omit `init`, take only the message, and return `unit`.
 - `send(address, message)` stages a one-way message. State and all outgoing messages commit together when the handler returns. Receivers can run only in later transitions. Replies require explicit protocol messages and reply addresses.
-- Ordinary `let` functions describe local computation. Their last expression is their result. Exhaustive `match`, records, variants, `Option<T>`, and `Result<T, E>` describe finite data.
+- Ordinary `let` functions describe local computation. Bindings and intermediate statements require `;`: `let next = state + 1; send(reply_to, Ack); next`. The final unterminated expression is the block's value; a trailing `;` discards it and returns `unit`. A non-tail `match` also requires `;`; match arms use `|`, with braces around multi-statement arms. Whitespace alone is not a statement separator. Exhaustive `match`, records, variants, `Option<T>`, and `Result<T, E>` describe finite data.
 - Properties are read-only expressions. Local `let` bindings work in functions and handlers, not directly inside a property body; call a pure/specification helper when a predicate needs local bindings. Top-level `let` declares functions, not constants. A handler cannot inspect another participant's state or use observation views.
 - `check` describes an experiment, not a `main()` function. `once send(...)` means **at most once**, not guaranteed arrival.
 

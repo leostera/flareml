@@ -6,8 +6,8 @@ actor Workflow {
   init(): Phase { Idle }
   handle_message(state: Phase, event: Event): Phase {
     match state {
-      | Idle -> { send(Workflow, Step) Prepared }
-      | Prepared -> { send(Workflow, Step) Committed }
+      | Idle -> { send(Workflow, Step); Prepared }
+      | Prepared -> { send(Workflow, Step); Committed }
       | Committed -> Finished
       | Finished -> Finished
     }

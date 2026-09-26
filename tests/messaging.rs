@@ -63,7 +63,7 @@ actor Sender {
   handle_message(message: Start): unit {
     match message {
       | Start -> {
-          send(Target, First)
+          send(Target, First);
           send(Target, Second);
           ()
         }
@@ -145,7 +145,7 @@ actor Loop {
   handle_message(state: Bool, msg: Tick): Bool {
     match msg {
       | Tick -> {
-          send(Loop, Tick)
+          send(Loop, Tick);
           !state
         }
     }
@@ -217,7 +217,7 @@ type Tick = Tick
 actor Earlier {
   init(): Actor<Later> { Later }
   handle_message(state: Actor<Later>, msg: Tick): Actor<Later> {
-    send(state, msg)
+    send(state, msg);
     state
   }
 }
@@ -251,7 +251,7 @@ fn transitive_send_helper_is_staged_and_init_cannot_send() {
     assert_eq!(run(&source).status, Status::VerifiedInScope);
     let bad = source.replace(
         "init(id: CounterId): Int { 0 }",
-        "init(id: CounterId): Int { notify(Client.at(User), Counted(First, 0)) 0 }",
+        "init(id: CounterId): Int { notify(Client.at(User), Counted(First, 0)); 0 }",
     );
     assert!(
         compile(&bad, None)
