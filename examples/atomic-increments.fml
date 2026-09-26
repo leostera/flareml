@@ -1,8 +1,8 @@
 // The repair: ask storage to increment atomically, rather than read then write.
 type ClientId = Alice | Bob
 type ClientMessage = Start | Ack
-type StoreMessage = Increment(Address<Client>)
-type ClientState = ClientState { me: Address<Client>, done: Bool }
+type StoreMessage = Increment(Actor<Client>)
+type ClientState = ClientState { me: Actor<Client>, done: Bool }
 actor Client(id: ClientId) {
   init(id: ClientId): ClientState { ClientState { me: Client.at(id), done: false } }
   handle_message(state: ClientState, message: ClientMessage): ClientState {

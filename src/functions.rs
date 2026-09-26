@@ -17,7 +17,7 @@ impl Program {
         names.extend(self.model.types.iter().map(|t| t.name.clone()));
         names.extend(
             [
-                "send", "inputs", "messages", "Some", "None", "Ok", "Err", "Address", "Option",
+                "send", "inputs", "messages", "Some", "None", "Ok", "Err", "Actor", "Option",
                 "Result",
             ]
             .into_iter()
@@ -145,7 +145,7 @@ impl Program {
             return Err(Error::new(span, "data type nesting exceeds 64"));
         }
         self.resolve(ty, span)?;
-        if ty.name == "Address" {
+        if ty.name == "Actor" {
             return Ok(());
         }
         for arg in &ty.args {

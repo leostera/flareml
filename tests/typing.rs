@@ -67,6 +67,57 @@ fn tail_match_requires_every_branch_to_return_expected_type() {
     }
 }
 #[test]
+fn actor_reference_type_is_not_a_state_capability_or_compatibility_alias() {
+    let source = include_str!("../examples/routed-deposits.fml");
+    assert!(compile(source, None).is_ok());
+    for ty in ["Address<Account>", "Actor<Int>", "Actor<Missing>", "Actor"] {
+        assert!(
+            compile(&source.replace("Actor<Account>", ty), None).is_err(),
+            "{ty}"
+        );
+    }
+}
+
+#[test]
+fn property_helpers_support_local_let_but_properties_are_expressions() {
+    let source = r#"
+actor Counter {
+  init(): Int { 0 }
+  handle_message(state: Int, message: unit): Int { state + 1 }
+}
+let bounded = (): Bool {
+  let current = Counter.state
+  let small = current <= 1
+  small
+}
+property "safe" { always bounded() }
+check C { mailbox_bound = 1 domain Int = 0..1 inputs { once send(Counter, ()) } }
+"#;
+    let p = compile(source, None).unwrap();
+    assert_eq!(
+        checker::check(source, &p, &Options::default())
+            .unwrap()
+            .status,
+        Status::VerifiedInScope
+    );
+    assert!(
+        compile(
+            &source.replace("always bounded()", "let small = bounded(); always small"),
+            None
+        )
+        .is_err()
+    );
+    assert!(compile(&format!("let limit = 1\n{source}"), None).is_err());
+    assert!(
+        compile(
+            &source.replace("{ state + 1 }", "{ let safe = bounded(); state }"),
+            None
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn globals_and_locals_cannot_be_shadowed() {
     for extra in [
         "let f = (send: Bool): Bool { send }",

@@ -60,7 +60,7 @@ fn misrouting_is_not_hidden_by_equal_message_payloads() {
 fn address_types_cannot_be_forged_or_used_as_state_capabilities() {
     for source in [
         ROUTED.replace("target: Account.at(Alice)", "target: Account.at(1)"),
-        ROUTED.replace("target: Address<Account>", "target: Address<Router>"),
+        ROUTED.replace("target: Actor<Account>", "target: Actor<Router>"),
         ROUTED.replace(
             "send(message.target, Deposit(message.amount))",
             "message.target.set(1)",

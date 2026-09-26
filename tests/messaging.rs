@@ -215,8 +215,8 @@ fn singleton_address_can_be_initialized_before_target_declaration() {
     let source = r#"
 type Tick = Tick
 actor Earlier {
-  init(): Address<Later> { Later }
-  handle_message(state: Address<Later>, msg: Tick): Address<Later> {
+  init(): Actor<Later> { Later }
+  handle_message(state: Actor<Later>, msg: Tick): Actor<Later> {
     send(state, msg)
     state
   }
@@ -243,7 +243,7 @@ check C {
 fn transitive_send_helper_is_staged_and_init_cannot_send() {
     let source = REPLY.replace(
         "actor Counter(id: CounterId) {",
-        "let notify = (address: Address<Client>, message: ClientMessage): unit { send(address, message) }\nactor Counter(id: CounterId) {",
+        "let notify = (address: Actor<Client>, message: ClientMessage): unit { send(address, message) }\nactor Counter(id: CounterId) {",
     ).replace(
         "send(reply_to, Counted(request_id, next))",
         "notify(reply_to, Counted(request_id, next))",

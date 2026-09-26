@@ -279,7 +279,7 @@ impl Program {
                 "LIMIT: value domain nesting exceeds 24",
             ));
         }
-        if t.name == "Address" {
+        if t.name == "Actor" {
             let actor = &self.actors[&t.args[0].name];
             let keys = if let Some((_, key)) = &actor.key {
                 self.type_domain(key, depth + 1)?

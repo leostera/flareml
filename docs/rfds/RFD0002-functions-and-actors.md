@@ -24,18 +24,20 @@ The core is deliberately small and fault-free. A generic atomic turn is useful f
 ```fml
 type AccountId = Alice | Bob
 type RequestId = First | Second
-type Request = Increment(Address<Client>, RequestId)
+type Request = Increment(Actor<Client>, RequestId)
 type Reply = Counted(RequestId, Int)
 type ClientState = Waiting | Observed
 
 let increment = (value: Int): Int { value + 1 }
 ```
 
-Closed variants and records describe data. Built-ins are `Bool`, `Int`, `String`, `unit`, `Option<T>`, `Result<T, E>`, and `Address<ActorName>`. Transparent named aliases are supported; user-defined generics and recursive data are not.
+Closed variants and records describe data. Built-ins are `Bool`, `Int`, `String`, `unit`, `Option<T>`, `Result<T, E>`, and `Actor<ActorName>`. The latter is a typed reference to a declared actor, not an owned-state capability. Transparent named aliases are supported; user-defined generics and recursive data are not.
 
 Functions use typed parameters and an explicit return type (omitting the type means `unit`). The final expression or exhaustive tail match is the result. Blocks contain `let` bindings, expression statements, and `match`. Branch-local bindings do not leak. Shadowing globals/locals, recursive local calls, non-exhaustive matches, nested constructor patterns, and record-destructuring patterns are rejected. Match a payload in a second match or bind a record and inspect fields instead.
 
 Result bindings must be matched immediately with explicit `Ok` and `Err` cases; wildcard disposal is rejected. Pure helpers, send helpers, and specification inspection are separated by conservative transitive effects. Send helpers can be called only as direct statements or bindings, not hidden inside arguments, records, constructors, or predicates.
+
+Top-level `let` declares functions; function/handler blocks support local value bindings. Property bodies are expressions, not statement blocks, so they do not directly accept `let`. A pure or specification-only helper may use local bindings and be called from a property.
 
 Finite collection literals and data quantifiers are specification expressions. In `forall (x in T)`, a declared type name denotes its finite domain even if T also names a constructor; elsewhere constructor syntax retains its data meaning.
 
@@ -62,7 +64,7 @@ actor Client {
 }
 ```
 
-A singleton omits the key and its declaration name is its address. Keyed identities are eagerly instantiated from a finite named data type; `Counter.at(Alice)` has type `Address<Counter>`. All addresses exist before pure initializers run. Initialization is identity-only: keyed `init` takes the key (its parameter name need not match the declaration), singleton `init` takes no arguments.
+A singleton omits the key and its declaration name is its address. Keyed identities are eagerly instantiated from a finite named data type; `Counter.at(Alice)` has type `Actor<Counter>`. All addresses exist before pure initializers run. Initialization is identity-only: keyed `init` takes the key (its parameter name need not match the declaration), singleton `init` takes no arguments.
 
 A stateful handler takes `(state: State, message: Message)` and returns `State`. The state argument is a snapshot value, not a live owner capability. A stateless actor omits `init`, takes only the message, and returns `unit`. Each actor has exactly one `handle_message`; protocol variants are matched within it.
 
@@ -136,12 +138,12 @@ From low to high: `leads_to`/`until`, `implies`, `||`, `&&`, equality (`==`/`!=`
 
 ## Stable observations
 
-`inputs(A)` ranges over A's external input slots across all keys, including before submission. Fields: `payload: Message`, `target: Address<A>`, `submitted: Bool`, `processed: Bool`. The two flags are monotone. Completion means only that slot's own callback committed—not that a generated reply or follow-up finished.
+`inputs(A)` ranges over A's external input slots across all keys, including before submission. Fields: `payload: Message`, `target: Actor<A>`, `submitted: Bool`, `processed: Bool`. The two flags are monotone. Completion means only that slot's own callback committed—not that a generated reply or follow-up finished.
 
 `messages(A)` requires `message_bound = N` and ranges over N stable potential slots from initialization. Each enqueue allocates a fresh slot for the target actor declaration, across all keys, with fields:
 
 - `sent`, `processed`, `external`: Boolean flags;
-- `payload: Option<Message>` and `target: Option<Address<A>>`;
+- `payload: Option<Message>` and `target: Option<Actor<A>>`;
 - before allocation: false flags and `None` data.
 
 Identical payloads get distinct slots; slots never recycle. Temporal bindings therefore retain identity, including for generated messages absent at initialization. Exhausting lifetime slots is inconclusive. Spare unused slots may have unreached antecedents; this is reported as a count, not as if the entire property ranged over an empty collection.

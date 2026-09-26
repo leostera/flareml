@@ -1,7 +1,7 @@
 // Transferable addresses route messages without exposing owned account state.
 type AccountId = Alice | Bob
 type AccountMessage = Deposit(Int)
-type Route = Route { target: Address<Account>, amount: Int }
+type Route = Route { target: Actor<Account>, amount: Int }
 actor Account(id: AccountId) {
   init(id: AccountId): Int { 0 }
   handle_message(state: Int, message: AccountMessage): Int {

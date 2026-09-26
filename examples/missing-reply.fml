@@ -2,7 +2,7 @@
 // Even weak progress cannot deliver a message the protocol never sends.
 type ClientState = Idle | Waiting | Finished
 type ClientMessage = Start | Counted(Int)
-type CounterMessage = Inc(Address<Client>)
+type CounterMessage = Inc(Actor<Client>)
 
 actor Client {
   init(): ClientState { Idle }

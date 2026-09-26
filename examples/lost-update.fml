@@ -3,9 +3,9 @@
 // This is an abstract storage protocol, not a D1 adapter.
 type ClientId = Alice | Bob
 type Phase = Idle | Reading | Writing | Done
-type ClientState = ClientState { me: Address<Client>, phase: Phase }
+type ClientState = ClientState { me: Actor<Client>, phase: Phase }
 type ClientMessage = Start | ReadValue(Int) | Ack
-type StoreMessage = Read(Address<Client>) | Write(Address<Client>, Int)
+type StoreMessage = Read(Actor<Client>) | Write(Actor<Client>, Int)
 
 actor Client(id: ClientId) {
   init(id: ClientId): ClientState { ClientState { me: Client.at(id), phase: Idle } }

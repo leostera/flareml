@@ -94,12 +94,11 @@ impl Program {
             actors: BTreeMap::new(),
             effects: BTreeMap::new(),
         };
-        let mut type_names: BTreeSet<String> = [
-            "Bool", "Int", "String", "unit", "Option", "Result", "Address",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+        let mut type_names: BTreeSet<String> =
+            ["Bool", "Int", "String", "unit", "Option", "Result", "Actor"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
         for d in &p.model.types {
             if !type_names.insert(d.name.clone()) {
                 return Err(Error::new(d.span, "duplicate or reserved type name"));
@@ -248,12 +247,12 @@ impl Program {
             .1
     }
     pub fn resolve(&self, t: &Type, span: Span) -> Result<Ty> {
-        if t.name == "Address" && t.args.len() == 1 {
+        if t.name == "Actor" && t.args.len() == 1 {
             let actor = &t.args[0];
             if !actor.args.is_empty() || !self.model.actors.iter().any(|a| a.name == actor.name) {
                 return Err(Error::new(
                     span,
-                    "Address<ActorName> requires a declared actor",
+                    "Actor<ActorName> requires a declared actor",
                 ));
             }
             return Ok(Ty::Address(actor.name.clone()));

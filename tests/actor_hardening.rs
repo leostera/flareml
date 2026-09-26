@@ -141,10 +141,10 @@ fn address_initialization_is_declaration_order_independent_and_enumerable() {
     let source = r#"
 type Key = Left | Right
 type Msg = Ping
-type Routes = Route(Address<Z>)
+type Routes = Route(Actor<Z>)
 actor A {
-  init(): Address<Z> { Z.at(Right) }
-  handle_message(state: Address<Z>, msg: Msg): Address<Z> { send(state, msg) state }
+  init(): Actor<Z> { Z.at(Right) }
+  handle_message(state: Actor<Z>, msg: Msg): Actor<Z> { send(state, msg) state }
 }
 actor Z(id: Key) {
   init(key: Key): Bool { false }

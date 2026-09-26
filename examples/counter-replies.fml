@@ -4,7 +4,7 @@
 type CounterId = Main
 type ClientId = User
 type RequestId = First
-type CounterMessage = Inc(Address<Client>, RequestId)
+type CounterMessage = Inc(Actor<Client>, RequestId)
 type ClientMessage = Counted(RequestId, Int)
 type ClientState = Waiting | Observed
 
