@@ -6,21 +6,29 @@ FML is a finite systems modeling language with a native Rust model checker—not
 
 There is **one language and one execution contract**: finite identities, per-address FIFO mailboxes, atomic state-and-send turns, optional external inputs, and explicit weak scheduling fairness. There is no `semantics` selector or compatibility runtime.
 
-## Try it
+## Get started
 
-Use **stable Rust**. The CLI uses `clap`; no JVM, cloud account, or external checker is required.
+Install the CLI from this checkout with **stable Rust**. No JVM, cloud account, or external checker is required.
 
 ```sh
-cargo run --locked -- check examples/counter-replies.fml --trace-out /tmp/replies.json
-cargo run --locked -- replay examples/counter-replies.fml /tmp/replies.json
-
-# Intentional bug: a client waits forever for a reply that was never sent (exit 1).
-cargo run --locked -- check examples/missing-reply.fml --trace-out /tmp/missing.json
-cargo run --locked -- replay examples/missing-reply.fml /tmp/missing.json
-
 cargo install --path . --locked
-fml check --help
+fml check examples/counter-replies.fml
+# An intentional missing-reply bug produces a counterexample (exit 1):
+fml check examples/missing-reply.fml
 ```
+
+Each run saves its source, report, and available witnesses in `.fml/runs/`; see [results and replay](#results-limits-and-replay) below. For command options run `fml check --help`.
+
+The installed binary also includes a version-matched agent manual:
+
+```sh
+fml skills                  # overview and topic index
+fml skills syntax           # detailed language syntax
+fml skills actors           # detailed actor semantics
+fml skills --install        # optional: install all pages to ~/.agents/skills/flareml/
+```
+
+`fml skills` prints the agent-readable [overview](docs/skills/fml/SKILL.md); `fml skills syntax|actors|properties|checks|observations|cli` prints detailed standalone manuals. All pages are embedded at build time, so the installed binary works without the source tree. `fml skills --install` installs the overview and topic pages to `~/.agents/skills/flareml/`; it refuses to overwrite differing files. Use `fml skills --help` for the topic list.
 
 [All examples](examples/README.md) have tested verdicts and replayable witnesses. Start with the [sequential workflow](examples/sequential-workflow.fml), then compare [lost updates](examples/lost-update.fml) with [atomic increments](examples/atomic-increments.fml).
 
@@ -138,59 +146,25 @@ fml replay model.fml /tmp/witness.json
 
 Closed variants are finite. `Int` and `String` data need explicit literal pools (`domain Int = 0..3`, `domain String = ["a", "b"]`). Crossing a bound never proves a property: values are not wrapped, transitions are not silently dropped, and full verification requires complete exploration.
 
-Every `check` that successfully reads its source creates a unique `.fml/runs/<run-id>/` bundle:
+Every `check` that successfully reads its source attempts to create a unique `.fml/runs/<run-id>/` bundle:
 
 ```text
 model.fml                 # exact source snapshot
-configuration.json        # requested options, tool version, source SHA-256
+configuration.json        # selected check/property and exploration limits, tool version, source SHA-256
 report.json               # results, completeness/cutoff, witness file index
 witnesses/0000.json        # each available counterexample/reached witness
 ```
 
 Use `--artifacts-dir /path/to/runs` to change the parent directory. The location is printed on stderr and included in successful JSON reports as `artifacts_dir`. Invalid models and initialization errors also leave an error report. Unreadable source or unwritable storage cannot produce a complete bundle; persistence failures exit 4. `report.json` is written last; its absence means bundle creation did not finish. This is not a power-loss durability guarantee. Bundles contain model data; manage access and retention accordingly.
 
-Verified properties need no witness; inconclusive runs do not fabricate evidence. `--trace-out` additionally exports one selected witness. Replay against the saved source, for example `fml replay .fml/runs/<run-id>/model.fml .fml/runs/<run-id>/witnesses/0000.json`. Reports are records of checker output, not independently checkable proof certificates.
+Verified and unreachable properties have no witness; incomplete runs never fabricate evidence, but may retain a valid reached witness found before a cutoff. `--trace-out` additionally exports one selected witness. Replay against the saved source, for example `fml replay .fml/runs/<run-id>/model.fml .fml/runs/<run-id>/witnesses/0000.json`. Reports are records of checker output, not independently checkable proof certificates.
 
 Replay reruns deterministic `main` and compares the complete initial snapshot, including captured inputs, before re-executing actions. It compares snapshots and provenance, checks source identity, loop closure and fairness, and independently interprets the property on the trace. Choice transcripts are replayed exactly, including encounter order, helper call sites, candidate positions, and values. Allocations are reconstructed and checked for freshness, initialization, bounds, and atomic publication. Only the current artifact format (**8**) is accepted; regenerate traces after source or format changes. Versioning artifacts does not select runtime behavior.
 
 Reports support automatic color, `--color always|never|auto`, and `NO_COLOR`. JSON never contains presentation ANSI escapes. The full syntax, precedence, assumptions, limits, and deferred features are in [RFD0002](docs/rfds/RFD0002-functions-and-actors.md).
 
-## Development and correctness
+## Scope and further reading
 
-```sh
-cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
-```
+Like TLC, FML explores a finite explicit state space; it does not implement TLA+ and supports a smaller temporal fragment. Search uses exact state equality without symmetry, partial-order, or symbolic reduction. A verified model is not proof of a deployed system's behavior.
 
-`rust-toolchain.toml` and normal CI use **stable**. Tests cover source-to-CLI behavior, atomicity, type/effect rejection, finite bounds, fair/unfair progress, missing replies, and trace corruption. Independent oracles compare:
-- all two-state graph/predicate/fairness combinations for seven temporal patterns;
-- generated three-state graphs with shared action identities;
-- FIFO scheduler transitions and cutoffs;
-- all 729 three-state/two-message deterministic transition tables;
-- 160 source-to-verdict Boolean self-message cases using an independent orbit/cycle oracle, including optional input starvation and weak fairness;
-- independent Cartesian enumeration of small choice lists, dependent helper choices/outboxes, branch-specific encounters, and choice-fairness regressions;
-- every reachable transition of a tiny two-coordinator allocation machine across four creation bounds and both fairness settings, plus future-instance temporal and allocation-replay regressions;
-- 155 explicit setup configurations against independently expected initial populations, initializer values, FIFO queues, captured inputs, provenance, and creation cutoffs.
-
-Metamorphic regressions check actor renaming, declaration reordering, and persistence of concrete counterexamples under larger mailbox bounds. Inventory reservation and payment idempotency each have a failing model and an atomic-boundary repair, with reachable completion checks.
-
-Like TLC, this is an explicit-state finite-model checker. It is not TLC, does not implement TLA+, and supports a much smaller temporal fragment.
-
-These improve confidence; they are not a proof of checker correctness. Search uses exact state equality without symmetry, partial-order, or symbolic reduction.
-
-**Nightly is optional and only for coverage/sanitizer-instrumented fuzzing:**
-
-```sh
-cargo install cargo-fuzz --locked
-rustup toolchain install nightly --profile minimal
-mkdir -p fuzz/corpus/source fuzz/corpus/trace_json
-cp examples/*.fml fuzz/corpus/source/
-cargo run --locked -- check examples/counter-replies.fml --trace-out fuzz/corpus/trace_json/replies.json
-cargo +nightly fuzz run source -- -max_total_time=120
-cargo +nightly fuzz run trace_json -- -max_total_time=120
-```
-
-A separate optional scheduled/manual workflow runs these campaigns and saves artifacts. See the [acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) for completed work and remaining validation.
-
-The [RFD roadmap](docs/rfds/README.md) proceeds one milestone at a time: choice, faulty links, and bounded dynamic spawning are implemented; explicit suspension/reentrancy remains an unimplemented sketch.
+The [language contract](docs/rfds/RFD0002-functions-and-actors.md), [choice extension](docs/rfds/RFD0003-nondeterministic-choice-and-faulty-links.md), and [explicit-population/spawn design](docs/rfds/RFD0004-bounded-spawn.md) describe the current assumptions and limits. The [RFD roadmap](docs/rfds/README.md) identifies suspension/reentrancy as an unimplemented sketch. For development setup, tests, fuzzing, and adding examples, see [CONTRIBUTING.md](CONTRIBUTING.md).

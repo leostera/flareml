@@ -60,6 +60,14 @@ impl Color {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Print the bundled agent guide or a detailed manual topic (Markdown).
+    Skills {
+        /// Install SKILL.md and all topic manuals into ~/.agents/skills/flareml/.
+        #[arg(long)]
+        install: bool,
+        #[command(subcommand)]
+        topic: Option<SkillTopic>,
+    },
     /// Explore a finite model and check its selected properties.
     Check {
         /// Model source (.fml).
@@ -93,6 +101,93 @@ enum Command {
         format: Format,
     },
 }
+#[derive(Subcommand)]
+enum SkillTopic {
+    /// Types, functions, expressions, patterns, and precedence.
+    Syntax,
+    /// Actor identity, messages, atomic turns, and modeling boundaries.
+    Actors,
+    /// Safety, reachability, temporal claims, and fairness.
+    Properties,
+    /// Finite experiments, bounds, inputs, and exploration.
+    Checks,
+    /// Read-only input and message histories in specifications.
+    Observations,
+    /// CLI usage, results, traces, and replay.
+    Cli,
+}
+fn skill(topic: Option<&SkillTopic>) -> &'static str {
+    match topic {
+        None => include_str!("../docs/skills/fml/SKILL.md"),
+        Some(SkillTopic::Syntax) => include_str!("../docs/skills/fml/syntax.md"),
+        Some(SkillTopic::Actors) => include_str!("../docs/skills/fml/actors.md"),
+        Some(SkillTopic::Properties) => include_str!("../docs/skills/fml/properties.md"),
+        Some(SkillTopic::Checks) => include_str!("../docs/skills/fml/checks.md"),
+        Some(SkillTopic::Observations) => include_str!("../docs/skills/fml/observations.md"),
+        Some(SkillTopic::Cli) => include_str!("../docs/skills/fml/cli.md"),
+    }
+}
+fn install_skills() -> std::result::Result<PathBuf, String> {
+    let home = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .or_else(|| std::env::var_os("USERPROFILE").filter(|home| !home.is_empty()))
+        .ok_or("HOME (or USERPROFILE) is not set")?;
+    let dest = PathBuf::from(home).join(".agents/skills/flareml");
+    let pages = [
+        ("SKILL.md", skill(None)),
+        ("syntax.md", skill(Some(&SkillTopic::Syntax))),
+        ("actors.md", skill(Some(&SkillTopic::Actors))),
+        ("properties.md", skill(Some(&SkillTopic::Properties))),
+        ("checks.md", skill(Some(&SkillTopic::Checks))),
+        ("observations.md", skill(Some(&SkillTopic::Observations))),
+        ("cli.md", skill(Some(&SkillTopic::Cli))),
+    ];
+    match fs::symlink_metadata(&dest) {
+        Ok(meta) if !meta.is_dir() || meta.file_type().is_symlink() => {
+            return Err(format!("{} is not a regular directory", dest.display()));
+        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!("{}: {e}", dest.display()));
+        }
+        _ => {}
+    }
+    // Check every destination before writing any file, to avoid overwriting user edits.
+    for (name, content) in pages {
+        let path = dest.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if !meta.is_file() || meta.file_type().is_symlink() => {
+                return Err(format!("{} is not a regular file", path.display()));
+            }
+            Ok(_) => {
+                if fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?
+                    != content.as_bytes()
+                {
+                    return Err(format!(
+                        "{} differs from the bundled skill; back it up or remove it before installing",
+                        path.display()
+                    ));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        }
+    }
+    fs::create_dir_all(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    for (name, content) in pages {
+        let path = dest.join(name);
+        if !path.exists() {
+            use std::io::Write;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+    }
+    Ok(dest)
+}
 fn read(path: &Path, max: u64) -> std::result::Result<String, String> {
     let size = fs::metadata(path)
         .map_err(|e| format!("{}: {e}", path.display()))?
@@ -122,7 +217,28 @@ fn error(format: Format, color: Color, status: &str, error: &Error, path: &Path,
 }
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::Skills { install, topic } = &cli.command {
+        if *install && topic.is_some() {
+            eprintln!("--install cannot be combined with a skills topic");
+            return ExitCode::from(2);
+        }
+        if *install {
+            return match install_skills() {
+                Ok(dest) => {
+                    println!("Installed FlareML skills in {}", dest.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("Could not install FlareML skills: {e}");
+                    ExitCode::from(4)
+                }
+            };
+        }
+        print!("{}", skill(topic.as_ref()));
+        return ExitCode::SUCCESS;
+    }
     let (path, format) = match &cli.command {
+        Command::Skills { .. } => unreachable!(),
         Command::Check { model, format, .. } | Command::Replay { model, format, .. } => {
             (model, *format)
         }
@@ -192,6 +308,7 @@ fn main() -> ExitCode {
         })
     };
     match &cli.command {
+        Command::Skills { .. } => unreachable!(),
         Command::Check {
             selected,
             property,

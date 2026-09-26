@@ -244,6 +244,106 @@ fn malformed_trace_is_tool_error() {
     );
 }
 #[test]
+fn skills_are_bundled_and_work_outside_the_checkout() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_fml"))
+        .arg("skills")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(out.stderr.is_empty());
+    assert_eq!(out.stdout, include_bytes!("../docs/skills/fml/SKILL.md"));
+    let text = String::from_utf8(out.stdout).unwrap();
+    let sample = text
+        .split("```fml\n")
+        .nth(1)
+        .unwrap()
+        .split("\n```")
+        .next()
+        .unwrap();
+    let model = dir.path().join("workflow.fml");
+    fs::write(&model, sample).unwrap();
+    let checked = fml(&["check", model.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+    assert_eq!(report["status"], "VERIFIED_IN_SCOPE");
+    let help = fml(&["skills", "--help"]);
+    assert!(help.status.success());
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains("--install"));
+    for (topic, page) in [
+        ("syntax", include_str!("../docs/skills/fml/syntax.md")),
+        ("actors", include_str!("../docs/skills/fml/actors.md")),
+        (
+            "properties",
+            include_str!("../docs/skills/fml/properties.md"),
+        ),
+        ("checks", include_str!("../docs/skills/fml/checks.md")),
+        (
+            "observations",
+            include_str!("../docs/skills/fml/observations.md"),
+        ),
+        ("cli", include_str!("../docs/skills/fml/cli.md")),
+    ] {
+        assert!(help.contains(topic));
+        let out = Command::new(env!("CARGO_BIN_EXE_fml"))
+            .args(["skills", topic])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{topic}");
+        assert_eq!(out.stdout, page.as_bytes(), "{topic}");
+        assert!(out.stderr.is_empty());
+    }
+    assert!(!fml(&["skills", "nonsense"]).status.success());
+}
+#[test]
+fn skills_install_is_idempotent_and_does_not_overwrite_edits() {
+    let home = tempfile::tempdir().unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_fml"))
+            .args(["skills", "--install"])
+            .env("HOME", home.path())
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let dest = home.path().join(".agents/skills/flareml");
+    for (name, page) in [
+        ("SKILL.md", include_str!("../docs/skills/fml/SKILL.md")),
+        ("syntax.md", include_str!("../docs/skills/fml/syntax.md")),
+        ("actors.md", include_str!("../docs/skills/fml/actors.md")),
+        (
+            "properties.md",
+            include_str!("../docs/skills/fml/properties.md"),
+        ),
+        ("checks.md", include_str!("../docs/skills/fml/checks.md")),
+        (
+            "observations.md",
+            include_str!("../docs/skills/fml/observations.md"),
+        ),
+        ("cli.md", include_str!("../docs/skills/fml/cli.md")),
+    ] {
+        assert_eq!(fs::read_to_string(dest.join(name)).unwrap(), page);
+    }
+    assert!(run().status.success());
+    fs::write(dest.join("actors.md"), "my custom skill").unwrap();
+    let out = run();
+    assert_eq!(out.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("differs"));
+    assert_eq!(
+        fs::read_to_string(dest.join("actors.md")).unwrap(),
+        "my custom skill"
+    );
+    assert!(!fml(&["skills", "--install", "actors"]).status.success());
+}
+#[test]
 fn version_and_help() {
     assert!(fml(&["--version"]).status.success());
     assert!(fml(&["--help"]).status.success());

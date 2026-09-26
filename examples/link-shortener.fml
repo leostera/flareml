@@ -1,0 +1,77 @@
+// Explicit setup creates one link store and client. The request carries both
+// references; no definition name is an address and no actor has an implicit self.
+type Destination = Docs | Home
+type Code = DocsLink
+type Command = Shorten(Actor<Client>, Actor<Shortener>, Destination) | Resolve(Actor<Client>, Code)
+type Reply = Created(Code, Actor<Client>, Actor<Shortener>) | Redirect(Destination) | Missing
+type StoreState = Empty | Stored(Destination)
+type ClientState = Waiting | HasCode(Code) | Arrived(Destination) | NotFound
+
+actor Shortener {
+  init(): StoreState { Empty }
+  handle_message(state: StoreState, command: Command): StoreState {
+    match command {
+      | Shorten(reply_to, self_ref, destination) -> {
+          send(reply_to, Created(DocsLink, reply_to, self_ref));
+          Stored(destination)
+        }
+      | Resolve(reply_to, code) -> {
+          match state {
+            | Empty -> {
+                send(reply_to, Missing);
+                Empty
+              }
+            | Stored(destination) -> {
+                match code {
+                  | DocsLink -> {
+                      send(reply_to, Redirect(destination));
+                      state
+                    }
+                }
+              }
+          }
+        }
+    }
+  }
+}
+
+actor Client {
+  init(): ClientState { Waiting }
+  handle_message(state: ClientState, reply: Reply): ClientState {
+    match reply {
+      | Created(code, me, shortener) -> {
+          send(shortener, Resolve(me, code));
+          HasCode(code)
+        }
+      | Redirect(destination) -> Arrived(destination)
+      | Missing -> NotFound
+    }
+  }
+}
+
+property "a link can be shortened and resolved" {
+  reachable (exists (client in instances(Client)) { client.state == Some(Arrived(Docs)) })
+}
+property "a redirect points to the stored destination" {
+  always (forall (client in instances(Client)) {
+    client.state == Some(Arrived(Docs)) implies
+      (exists (shortener in instances(Shortener)) { shortener.state == Some(Stored(Docs)) })
+  })
+}
+property "submitted shortening work completes" {
+  forall (i in inputs(Shortener)) {
+    i.submitted leads_to (exists (client in instances(Client)) { client.state == Some(Arrived(Docs)) })
+  }
+}
+
+check ShortenOneLink {
+  spawn_bound Shortener = 1
+  spawn_bound Client = 1
+  mailbox_bound = 1
+  main {
+    let shortener = spawn(Shortener);
+    let client = spawn(Client);
+    inputs { once send(shortener, Shorten(client, shortener, Docs)) }
+  }
+  fairness { weak runtime.progress }
+}

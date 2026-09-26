@@ -78,4 +78,4 @@ cargo run --locked -- check examples/missing-reply.fml --trace-out /tmp/missing.
 cargo run --locked -- replay examples/missing-reply.fml /tmp/missing.json
 ```
 
-Nightly is needed only for optional instrumented fuzzing; instructions are in the root README. Normal checking, replay, tests, independent oracles, and Clippy use stable.
+Nightly is needed only for optional instrumented fuzzing; contributor instructions are in [CONTRIBUTING.md](../../CONTRIBUTING.md). Normal checking, replay, tests, independent oracles, and Clippy use stable.

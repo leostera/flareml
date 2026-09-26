@@ -14,6 +14,7 @@ fn every_scenario_has_a_checked_verdict_and_replay() {
         ("atomic-increments.fml", Status::VerifiedInScope),
         ("routed-deposits.fml", Status::VerifiedInScope),
         ("eligibility-check.fml", Status::VerifiedInScope),
+        ("link-shortener.fml", Status::VerifiedInScope),
         ("inventory-reservation-bug.fml", Status::Violated),
         ("inventory-reservation-fixed.fml", Status::VerifiedInScope),
         ("payment-idempotency-bug.fml", Status::Violated),

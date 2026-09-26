@@ -7,6 +7,7 @@ All examples use the same current language and FIFO/atomic-turn execution contra
 | [explicit-startup.fml](explicit-startup.fml) | Does explicit setup enqueue startup work before exploration? | Verified; completion reachable |
 | [sequential-workflow.fml](sequential-workflow.fml) | Does a single participant progress through observable preparation/commit steps? | Verified; intermediate states reachable |
 | [eligibility-check.fml](eligibility-check.fml) | Can a pure policy deny an ineligible request? | Verified |
+| [link-shortener.fml](link-shortener.fml) | Can a client shorten and resolve a finite link, and do redirects match stored destinations? | Verified |
 | [counter-replies.fml](counter-replies.fml) | Are replies processed after commit, and does generated work progress fairly? | Verified; reply reachable |
 | [missing-reply.fml](missing-reply.fml) | Does returning state implicitly send a reply? | Violated: fair missing-reply lasso |
 | [routed-deposits.fml](routed-deposits.fml) | Do transferable addresses route deposits to explicitly created, isolated accounts? | Verified; both deposits reachable |
@@ -39,4 +40,4 @@ Every actor declaration is a definition only. Each example's `check.main` explic
 
 Every check automatically saves a run bundle under `.fml/runs/`, including the source snapshot and all available witnesses; replay against that snapshot after editing the original model.
 
-Every `.fml` file here must be listed in `tests/examples.rs`, which checks its verdict and replays every generated witness. Regenerate artifacts when source changes.
+To add or change examples, follow [CONTRIBUTING.md](../CONTRIBUTING.md) for verdict fixtures, replay checks, and documentation updates.
