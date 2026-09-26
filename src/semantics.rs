@@ -16,6 +16,8 @@ pub enum Value {
     Record(String, BTreeMap<String, Value>),
     List(Vec<Value>),
     Request(usize),
+    Input(usize),
+    Message(String, usize),
     Actor(String),
     KeyedActor(String, Box<Value>),
     Address(String, Box<Value>),
@@ -61,6 +63,8 @@ impl std::fmt::Display for Value {
             ),
             Self::List(xs) => write!(f, "[{}]", joined(xs)),
             Self::Request(i) => write!(f, "request #{i}"),
+            Self::Input(i) => write!(f, "input #{i}"),
+            Self::Message(actor, i) => write!(f, "{actor} message #{i}"),
             Self::Actor(name) => write!(f, "actor {name}"),
             Self::KeyedActor(name, key) => write!(f, "actor {name}.at({key})"),
             Self::Address(name, key) => write!(f, "{name}.at({key})"),
@@ -106,6 +110,22 @@ pub struct Frame {
     pub response: Value,
     pub stack: Vec<Continuation>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Envelope {
+    pub payload: Value,
+    pub input: Option<usize>,
+    pub observation: Option<usize>,
+    pub source: Span,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MessageObservation {
+    pub payload: Value,
+    pub target: Value,
+    pub external: bool,
+    pub processed: bool,
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct State {
     pub actors: BTreeMap<String, Value>,
@@ -118,9 +138,13 @@ pub struct State {
         skip_serializing_if = "BTreeMap::is_empty",
         with = "mailbox_serde"
     )]
-    pub mailboxes: BTreeMap<Value, Vec<Value>>,
+    pub mailboxes: BTreeMap<Value, Vec<Envelope>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub input_submitted: Vec<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_processed: Vec<bool>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub messages: BTreeMap<String, Vec<MessageObservation>>,
 }
 // JSON objects require string keys. Actor identities are typed Values, so encode
 // per-actor state as ordered (identity, state) pairs instead of stringifying keys.
@@ -157,20 +181,20 @@ mod keyed_actor_serde {
     }
 }
 mod mailbox_serde {
-    use super::Value;
+    use super::{Envelope, Value};
     use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
     use std::collections::BTreeMap;
 
     pub fn serialize<S: Serializer>(
-        values: &BTreeMap<Value, Vec<Value>>,
+        values: &BTreeMap<Value, Vec<Envelope>>,
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
         values.iter().collect::<Vec<_>>().serialize(serializer)
     }
     pub fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> std::result::Result<BTreeMap<Value, Vec<Value>>, D::Error> {
-        let entries = Vec::<(Value, Vec<Value>)>::deserialize(deserializer)?;
+    ) -> std::result::Result<BTreeMap<Value, Vec<Envelope>>, D::Error> {
+        let entries = Vec::<(Value, Vec<Envelope>)>::deserialize(deserializer)?;
         let count = entries.len();
         let result: BTreeMap<_, _> = entries.into_iter().collect();
         if count != result.len() {
@@ -282,6 +306,30 @@ impl Program {
         Ok(s)
     }
     pub fn check_value(&self, v: &Value, span: Span) -> Result<()> {
+        if self.check.semantics == "actors-v2" {
+            let mut remaining = 4096usize;
+            let mut pending = vec![(v, 0)];
+            while let Some((value, depth)) = pending.pop() {
+                if remaining == 0 || depth > 64 {
+                    return Err(Error::new(
+                        span,
+                        "LIMIT: value exceeds 4096 nodes or nesting depth 64",
+                    ));
+                }
+                remaining -= 1;
+                match value {
+                    Value::Variant(_, xs) | Value::List(xs) => {
+                        pending.extend(xs.iter().map(|v| (v, depth + 1)))
+                    }
+                    Value::Record(_, fs) => pending.extend(fs.values().map(|v| (v, depth + 1))),
+                    Value::Address(_, key) => pending.push((key, depth + 1)),
+                    _ => {}
+                }
+            }
+        }
+        self.check_value_domains(v, span)
+    }
+    fn check_value_domains(&self, v: &Value, span: Span) -> Result<()> {
         match v {
             Value::Int(_) | Value::String(_) => {
                 let name = if matches!(v, Value::Int(_)) {
@@ -305,15 +353,15 @@ impl Program {
                     ));
                 }
             }
-            Value::Address(_, key) => self.check_value(key, span)?,
+            Value::Address(_, key) => self.check_value_domains(key, span)?,
             Value::Variant(_, xs) | Value::List(xs) => {
                 for x in xs {
-                    self.check_value(x, span)?;
+                    self.check_value_domains(x, span)?;
                 }
             }
             Value::Record(_, fs) => {
                 for x in fs.values() {
-                    self.check_value(x, span)?;
+                    self.check_value_domains(x, span)?;
                 }
             }
             _ => {}
@@ -396,6 +444,18 @@ impl Program {
                 "recursive domain is unsupported",
             ));
         }
+        if self.check.semantics == "actors-v2" && t.name == "Address" && t.args.len() == 1 {
+            let actor = &self.actors[&t.args[0].name];
+            let keys = if let Some((_, key)) = &actor.key {
+                self.type_domain(key, depth + 1)?
+            } else {
+                vec![Value::Unit]
+            };
+            return Ok(keys
+                .into_iter()
+                .map(|key| Value::Address(actor.name.clone(), Box::new(key)))
+                .collect());
+        }
         if t.name == "Option" && t.args.len() == 1 {
             let mut v = vec![Value::none()];
             v.extend(
@@ -421,6 +481,7 @@ impl Program {
         }
     }
     pub fn eval(&self, e: &Expr, env: &Env, s: &State) -> Result<Value> {
+        let _guard = crate::evaluation::EvaluationGuard::enter(e.span)?;
         use ExprKind::*;
         if let ExprKind::Field(_, field) = &e.kind
             && field == "state"
@@ -503,6 +564,8 @@ impl Program {
                     .get(n)
                     .cloned()
                     .ok_or_else(|| Error::new(e.span, "missing record field")),
+                Value::Input(i) => self.input_field(i, n, s, e.span),
+                Value::Message(actor, i) => self.message_field(&actor, i, n, s, e.span),
                 Value::Request(i) => {
                     let f = s
                         .frames
@@ -549,6 +612,11 @@ impl Program {
                         ));
                     }
                     let values = args.iter().map(ev).collect::<Result<Vec<_>>>()?;
+                    if self.check.semantics == "actors-v2" {
+                        for value in &values {
+                            self.check_value(value, e.span)?;
+                        }
+                    }
                     let mut locals = function
                         .params
                         .iter()
@@ -556,6 +624,22 @@ impl Program {
                         .map(|((name, _), v)| (name.clone(), v))
                         .collect();
                     return self.eval_function_body(&function.body, &mut locals, s);
+                }
+                if self.check.semantics == "actors-v2" && (path == "inputs" || path == "messages") {
+                    let actor = args[0].path().unwrap_or_default();
+                    return Ok(Value::List(if path == "inputs" {
+                        self.check
+                            .inputs
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, input)| self.handlers[&input.handler].actor == actor)
+                            .map(|(i, _)| Value::Input(i))
+                            .collect()
+                    } else {
+                        (0..self.check.message_bound.expect("typed observation bound"))
+                            .map(|i| Value::Message(actor.clone(), i))
+                            .collect()
+                    }));
                 }
                 if path == "requests" {
                     let h = args[0].path().unwrap_or_default();
@@ -675,17 +759,32 @@ impl Program {
         env: &mut Env,
         s: &State,
     ) -> Result<Value> {
+        let _guard = crate::evaluation::EvaluationGuard::enter(
+            body.first().map_or(Span::default(), |s| s.span),
+        )?;
         let mut result = Value::Unit;
         for statement in body {
             result = match &statement.kind {
                 StmtKind::Let(name, expr) => {
                     let value = self.eval(expr, env, s)?;
+                    if self.check.semantics == "actors-v2" {
+                        self.check_value(&value, expr.span)?;
+                    }
                     env.insert(name.clone(), value);
                     Value::Unit
                 }
-                StmtKind::Expr(expr) => self.eval(expr, env, s)?,
+                StmtKind::Expr(expr) => {
+                    let value = self.eval(expr, env, s)?;
+                    if self.check.semantics == "actors-v2" {
+                        self.check_value(&value, expr.span)?;
+                    }
+                    value
+                }
                 StmtKind::Match(expr, arms) => {
                     let value = self.eval(expr, env, s)?;
+                    if self.check.semantics == "actors-v2" {
+                        self.check_value(&value, expr.span)?;
+                    }
                     let mut result = None;
                     for (pattern, branch) in arms {
                         let mut locals = env.clone();
@@ -702,6 +801,9 @@ impl Program {
                     })?
                 }
             };
+        }
+        if self.check.semantics == "actors-v2" {
+            self.check_value(&result, body.last().map_or(Span::default(), |s| s.span))?;
         }
         Ok(result)
     }

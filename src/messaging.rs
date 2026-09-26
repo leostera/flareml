@@ -4,7 +4,6 @@ use crate::{
     semantics::{Action, Env, State, Step, Value, bind_pattern},
     syntax::{Error, Expr, ExprKind, Result, Span, Stmt, StmtKind},
 };
-use std::collections::BTreeMap;
 
 impl Program {
     pub(crate) fn initial_messages(&self) -> Result<State> {
@@ -28,6 +27,12 @@ impl Program {
                 self.check_value(&key, actor.span)?;
                 s.mailboxes
                     .insert(Value::Address(actor.name.clone(), Box::new(key)), vec![]);
+                if s.mailboxes.len() > 4096 {
+                    return Err(Error::new(
+                        actor.span,
+                        "LIMIT: total actor address capacity (4096)",
+                    ));
+                }
             }
         }
         // All typed addresses exist before any initializer runs. Initialization
@@ -83,6 +88,7 @@ impl Program {
             let message = self.eval(&input.value, &Env::new(), &s)?;
             self.check_value(&message, input.span)?;
             s.input_submitted.push(false);
+            s.input_processed.push(false);
         }
         Ok(s)
     }
@@ -97,10 +103,6 @@ impl Program {
             },
             state: s.clone(),
         }];
-        let bound = self
-            .check
-            .mailbox_bound
-            .expect("validated actors-v2 mailbox bound");
         for (i, input) in self.check.inputs.iter().enumerate() {
             if s.input_submitted[i] {
                 continue;
@@ -115,19 +117,13 @@ impl Program {
                 Value::Address(self.handlers[&input.handler].actor.clone(), Box::new(key));
             let message = self.eval(&input.value, &Env::new(), s)?;
             let mut next = s.clone();
-            let queue = next.mailboxes.get_mut(&address).ok_or_else(|| {
-                Error::new(
-                    input.span,
-                    "LIMIT: input target outside finite identity domain",
-                )
-            })?;
-            if queue.len() >= bound {
-                return Err(Error::new(
-                    input.span,
-                    format!("LIMIT: mailbox capacity ({bound}) at {address}"),
-                ));
-            }
-            queue.push(message.clone());
+            self.enqueue_message(
+                &mut next,
+                address.clone(),
+                message.clone(),
+                Some(i),
+                input.span,
+            )?;
             next.input_submitted[i] = true;
             steps.push(Step {
                 action: Action {
@@ -140,9 +136,10 @@ impl Program {
             });
         }
         for (address, queue) in &s.mailboxes {
-            let Some(message) = queue.first() else {
+            let Some(envelope) = queue.first() else {
                 continue;
             };
+            let message = &envelope.payload;
             let Value::Address(actor_name, key) = address else {
                 return Err(Error::new(Span::default(), "internal: invalid mailbox key"));
             };
@@ -182,28 +179,22 @@ impl Program {
                     next.actors.insert(actor_name.clone(), next_state.clone());
                 }
             }
-            let mut counts = BTreeMap::<Value, usize>::new();
-            for (target, value) in outbox {
-                self.check_value(&value, function.span)?;
-                let queue = next.mailboxes.get_mut(&target).ok_or_else(|| {
-                    Error::new(
-                        function.span,
-                        "LIMIT: send target outside finite identity domain",
-                    )
-                })?;
-                if queue.len() >= bound {
-                    return Err(Error::new(
-                        function.span,
-                        format!("LIMIT: mailbox capacity ({bound}) at {target}"),
-                    ));
-                }
-                queue.push(value);
-                *counts.entry(target).or_default() += 1;
+            if let Some(i) = envelope.input {
+                next.input_processed[i] = true;
+            }
+            if let Some(i) = envelope.observation {
+                next.messages.get_mut(actor_name).expect("observed actor")[i].processed = true;
+            }
+            let count = outbox.len();
+            let mut sends = vec![];
+            for (target, value, source) in outbox {
+                sends.push(format!("{value} -> {target} at byte {}", source.start));
+                self.enqueue_message(&mut next, target, value, None, source)?;
             }
             steps.push(Step {
                 action: Action {
                     id: format!("process:{}", serde_json::to_string(address).expect("serializable address")),
-                    description: format!("process {message} at {address}; commit {next_state}; enqueue {} message(s)", counts.values().sum::<usize>()),
+                    description: format!("process {message} at {address}; commit {next_state}; enqueue {count} message(s) [{}]", sends.join(", ")),
                     span: function.span,
                     fair: self.check.fair,
                 },
@@ -218,8 +209,11 @@ impl Program {
         body: &[Stmt],
         env: &mut Env,
         s: &State,
-        outbox: &mut Vec<(Value, Value)>,
+        outbox: &mut Vec<(Value, Value, Span)>,
     ) -> Result<Value> {
+        let _guard = crate::evaluation::EvaluationGuard::enter(
+            body.first().map_or(Span::default(), |s| s.span),
+        )?;
         let mut result = Value::Unit;
         for statement in body {
             result = match &statement.kind {
@@ -231,6 +225,7 @@ impl Program {
                 StmtKind::Expr(expr) => self.eval_message_expr(expr, env, s, outbox)?,
                 StmtKind::Match(expr, arms) => {
                     let value = self.eval(expr, env, s)?;
+                    self.check_value(&value, expr.span)?;
                     let mut chosen = None;
                     for (pattern, branch) in arms {
                         let mut locals = env.clone();
@@ -254,7 +249,7 @@ impl Program {
         expr: &Expr,
         env: &Env,
         s: &State,
-        outbox: &mut Vec<(Value, Value)>,
+        outbox: &mut Vec<(Value, Value, Span)>,
     ) -> Result<Value> {
         if let ExprKind::Call(target, args) = &expr.kind {
             let path = target.path().unwrap_or_default();
@@ -268,7 +263,7 @@ impl Program {
                         "LIMIT: send target outside finite identity domain",
                     ));
                 }
-                outbox.push((address, message));
+                outbox.push((address, message, expr.span));
                 return Ok(Value::Unit);
             }
             if let Some(f) = self.functions.get(&path)
@@ -278,6 +273,9 @@ impl Program {
                     .iter()
                     .map(|e| self.eval(e, env, s))
                     .collect::<Result<Vec<_>>>()?;
+                for value in &values {
+                    self.check_value(value, expr.span)?;
+                }
                 let mut locals: Env = f
                     .params
                     .iter()
@@ -287,6 +285,8 @@ impl Program {
                 return self.eval_message_body(&f.body, &mut locals, s, outbox);
             }
         }
-        self.eval(expr, env, s)
+        let value = self.eval(expr, env, s)?;
+        self.check_value(&value, expr.span)?;
+        Ok(value)
     }
 }

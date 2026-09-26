@@ -10,6 +10,8 @@ pub enum Ty {
     List(Box<Ty>),
     Rows(String),
     Request(String),
+    Input(String),
+    Message(String),
     Actor(Box<Ty>),
     Address(String),
     Temporal,
@@ -151,6 +153,9 @@ impl Program {
                 check.span,
                 "actors-v2 requires mailbox_bound; older profiles cannot declare one",
             ));
+        }
+        if check.message_bound.is_some() && check.semantics != "actors-v2" {
+            return Err(Error::new(check.span, "message_bound requires actors-v2"));
         }
         if check.semantics == "actors-v2" && !model.tables.is_empty() {
             return Err(Error::new(
@@ -677,6 +682,12 @@ impl Program {
             .path()
             .and_then(|path| path.strip_suffix(".state").and_then(|n| self.actors.get(n)))
         {
+            if actor.key.is_some() {
+                return Err(Error::new(
+                    e.span,
+                    "keyed state inspection requires Actor.at(key).state",
+                ));
+            }
             if !property {
                 return Err(Error::new(
                     e.span,
@@ -778,6 +789,24 @@ impl Program {
             }
             ExprKind::Field(x, n) => match pure(x)? {
                 Ty::Actor(state) if n == "state" => Ok(*state),
+                Ty::Input(actor) => match n.as_str() {
+                    "submitted" | "processed" => Ok(boolty),
+                    "payload" => self.resolve(
+                        &self.handlers[&format!("{actor}.handle_message")].input,
+                        e.span,
+                    ),
+                    "target" => Ok(Ty::Address(actor)),
+                    _ => Err(Error::new(e.span, "unknown input observation field")),
+                },
+                Ty::Message(actor) => match n.as_str() {
+                    "sent" | "processed" | "external" => Ok(boolty),
+                    "payload" => Ok(Ty::Option(Box::new(self.resolve(
+                        &self.handlers[&format!("{actor}.handle_message")].input,
+                        e.span,
+                    )?))),
+                    "target" => Ok(Ty::Option(Box::new(Ty::Address(actor)))),
+                    _ => Err(Error::new(e.span, "unknown message observation field")),
+                },
                 Ty::Request(h) => {
                     let handler = &self.handlers[&h];
                     match n.as_str() {
@@ -914,6 +943,26 @@ impl Program {
                         args[1].span,
                     )?;
                     return self.resolve(&handler.output, e.span);
+                }
+                if self.check.semantics == "actors-v2" && (path == "inputs" || path == "messages") {
+                    if !property || args.len() != 1 {
+                        return Err(Error::new(
+                            e.span,
+                            "inputs/messages is a specification-only view of one actor declaration",
+                        ));
+                    }
+                    let actor = args[0].path().filter(|n| self.actors.contains_key(n)).ok_or_else(|| Error::new(e.span, "inputs/messages requires an actor declaration, not a keyed address"))?;
+                    if path == "messages" && self.check.message_bound.is_none() {
+                        return Err(Error::new(
+                            e.span,
+                            "messages(Actor) requires an explicit message_bound",
+                        ));
+                    }
+                    return Ok(Ty::List(Box::new(if path == "inputs" {
+                        Ty::Input(actor)
+                    } else {
+                        Ty::Message(actor)
+                    })));
                 }
                 if path == "requests" {
                     if self.check.semantics == "actors-v2" {
@@ -1187,11 +1236,11 @@ pub fn validate_temporal(e: &Expr) -> Result<()> {
             ..
         } => {
             let stable = matches!(domain.kind, Name(_))
-                || matches!(&domain.kind,Call(f,_) if f.path().as_deref()==Some("requests"));
+                || matches!(&domain.kind,Call(f,_) if matches!(f.path().as_deref(), Some("requests" | "inputs" | "messages")));
             if !stable {
                 return Err(Error::new(
                     domain.span,
-                    "temporal quantification requires a stable type domain or requests view",
+                    "temporal quantification requires a stable type domain or requests/inputs/messages view",
                 ));
             }
             validate_temporal(body)?;

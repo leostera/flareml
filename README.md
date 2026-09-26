@@ -23,6 +23,9 @@ cargo run -- check examples/actor-interleaving.fml
 # The new async actor profile checks and replays a message-response protocol:
 cargo run -- check examples/actor-messages.fml --trace-out /tmp/actor-messages.trace.json
 cargo run -- replay examples/actor-messages.fml /tmp/actor-messages.trace.json
+# A missing protocol reply fails even with fair scheduling (expected exit 1):
+cargo run -- check examples/actor-missing-reply.fml --trace-out /tmp/missing-reply.trace.json
+cargo run -- replay examples/actor-missing-reply.fml /tmp/missing-reply.trace.json
 ```
 
 Buggy examples intentionally exit with code **1**. To install the CLI locally:
@@ -161,9 +164,11 @@ Ranges are inclusive; aliases share the underlying pool. Escaping a pool is inco
 
 ### Experimental asynchronous actors (`actors-v2`, spike branch)
 
-The [message-response fixture](examples/actor-messages.fml) uses one `actor` declaration form, a pure `init(id): State`, `handle_message(state: State, message: Message): State`, and typed `send(address, message)`. Actors without `init` have a one-argument message handler returning `unit`. `once send(Actor.at(key), message)` is an optional external submission; only enabled mailbox-head processing is subject to `weak runtime.progress`. A handler runs to completion in one atomic transition: it returns the next owned state and publishes its staged outgoing sends together, in source order. Each typed actor address has a finite FIFO mailbox; `mailbox_bound = N` is required, and exceeding it is **INCONCLUSIVE**, never a silently dropped message. There is no implicit reply: pass a typed reply address and a correlation ID in the message. The fixture has a replayable cover, a safety invariant, and a format-version-4 trace.
+The [message-response fixture](examples/actor-messages.fml) uses one `actor` declaration form, a pure `init(id): State`, `handle_message(state: State, message: Message): State`, and typed `send(address, message)`. Actors without `init` have a one-argument message handler returning `unit`. `once send(Actor.at(key), message)` is an optional external submission; only enabled mailbox-head processing is subject to `weak runtime.progress`. A handler runs to completion in one atomic transition: it returns the next owned state and publishes its staged outgoing sends together, in source order. Each typed actor address has a finite FIFO mailbox; `mailbox_bound = N` is required, and exceeding it is **INCONCLUSIVE**, never a silently dropped message. There is no implicit reply: pass a typed reply address and a correlation ID in the message. The fixture has replayable covers, a safety invariant, conditional reply liveness, and a format-version-5 trace.
 
-This is a **fault-free, in-memory modeling profile**, not Cloudflare Queue/DO semantics: it has no crashes, retries, durability, I/O within callbacks, timeout, or live suspension. It has no `requests(...)` inspector for generated messages or dynamic temporal message quantification yet. More independent scheduler/fairness and capability validation is still required before RFD0002 is complete.
+`inputs(Actor)` exposes stable external slots with typed `payload`/`target` and `submitted`/`processed` flags. `messages(Actor)` observes external **and generated** sends through a finite lifetime pool selected with `message_bound = N` (per actor declaration, across keys). Slots exist for temporal binding before messages are sent; they expose `sent`, `processed`, `external`, and optional `payload`/`target`. Slots are never reused, and exhausting the pool is inconclusive. Omit this bound when checking infinite finite-state message cycles without lifetime history. Input completion does not imply reply completion. `requests(...)` is still an older-profile inspector, not an alias for either view.
+
+This is a **fault-free, in-memory modeling profile**, not Cloudflare Queue/DO semantics: it has no crashes, retries, durability, I/O within callbacks, timeout, or live suspension. The independent FIFO scheduler oracle, fairness tests, and effect/capability hardening now cover the generic core. The [RFD0002 acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) keeps product adapters and coverage-instrumented fuzzing explicitly unfinished; passing generic models do not establish those contracts. V2 format-4 artifacts must be regenerated; older profiles keep format 3.
 
 ### Earlier synchronous actor profile (`actors-v1`, spike branch)
 

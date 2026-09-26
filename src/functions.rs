@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 impl Program {
     pub(crate) fn is_global(&self, name: &str) -> bool {
-        self.functions.contains_key(name)
+        (self.check.semantics == "actors-v2" && ["inputs", "messages"].contains(&name))
+            || self.functions.contains_key(name)
             || self.actors.contains_key(name)
             || self.constructors.contains_key(name)
             || self
@@ -37,6 +38,9 @@ impl Program {
             .into_iter()
             .map(str::to_owned),
         );
+        if self.check.semantics == "actors-v2" {
+            names.extend(["inputs".into(), "messages".into()]);
+        }
         for f in &self.model.functions {
             if !names.insert(f.name.clone()) {
                 return Err(Error::new(
@@ -154,8 +158,14 @@ impl Program {
         for actor in self.actors.values().filter(|a| a.v2) {
             if let Some(init) = &actor.initializer {
                 let f = &self.functions[init];
-                if f.params.len() != usize::from(actor.key.is_some())
-                    || actor.key.as_ref().is_some_and(|(_, t)| f.params[0].1 != *t)
+                let key_matches = match (&actor.key, f.params.as_slice()) {
+                    (None, []) => true,
+                    (Some((_, key)), [(_, param)]) => {
+                        self.resolve(key, actor.span)? == self.resolve(param, f.span)?
+                    }
+                    _ => false,
+                };
+                if !key_matches
                     || self.effects[init].suspends_or_writes()
                     || self.effects[init].inspects
                 {
@@ -178,6 +188,16 @@ impl Program {
     }
 
     fn require_data(&self, ty: &Type, span: Span, seen: &mut BTreeSet<String>) -> Result<()> {
+        self.require_data_inner(ty, span, seen, &mut BTreeSet::new())
+    }
+
+    fn require_data_inner(
+        &self,
+        ty: &Type,
+        span: Span,
+        seen: &mut BTreeSet<String>,
+        done: &mut BTreeSet<String>,
+    ) -> Result<()> {
         if ty.name == "Actor" {
             return Err(Error::new(
                 span,
@@ -190,19 +210,33 @@ impl Program {
         }
         self.resolve(ty, span)?;
         for arg in &ty.args {
-            self.require_data(arg, span, seen)?;
+            self.require_data_inner(arg, span, seen, done)?;
         }
         let Ty::Named(name) = self.resolve(ty, span)? else {
             return Ok(());
         };
-        if !seen.insert(name.clone()) {
+        if done.contains(&name) {
             return Ok(());
+        }
+        if !seen.insert(name.clone()) {
+            if self.check.semantics == "actors-v2" {
+                return Err(Error::new(
+                    span,
+                    "recursive data requires an explicit depth-bound profile; unsupported in actors-v2",
+                ));
+            }
+            return Ok(());
+        }
+        if seen.len() > 64 {
+            return Err(Error::new(span, "data type nesting exceeds 64"));
         }
         for c in self.constructors.values().filter(|c| c.ty == name) {
             for field in c.payload.iter().chain(c.fields.values()) {
-                self.require_data(field, span, seen)?;
+                self.require_data_inner(field, span, seen, done)?;
             }
         }
+        seen.remove(&name);
+        done.insert(name);
         Ok(())
     }
 
@@ -244,7 +278,10 @@ impl Program {
                     if self.functions.contains_key(&path) {
                         dependencies.push(path.clone());
                     }
-                    if path == "requests" {
+                    if path == "requests"
+                        || (self.check.semantics == "actors-v2"
+                            && (path == "inputs" || path == "messages"))
+                    {
                         fx.inspects = true;
                     }
                     if path == "call" || path == "send" {
@@ -275,13 +312,23 @@ impl Program {
             )
         })?;
         let mut costs = BTreeMap::<String, usize>::new();
+        let mut depths = BTreeMap::<String, usize>::new();
         for index in order.into_iter().rev() {
             let name = &graph[index];
             let (mut fx, dependencies, mut cost) = direct[name].clone();
+            let mut depth = 1;
             for dep in dependencies {
                 fx.include(self.effects[&dep]);
                 cost = cost.saturating_add(costs[&dep]);
+                depth = depth.max(1 + depths[&dep]);
             }
+            if depth > 64 {
+                return Err(Error::new(
+                    self.functions[name].span,
+                    "local function call depth exceeds 64",
+                ));
+            }
+            depths.insert(name.clone(), depth);
             if cost > 10_000 {
                 return Err(Error::new(
                     self.functions[name].span,

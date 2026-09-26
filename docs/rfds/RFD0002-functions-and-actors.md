@@ -6,13 +6,13 @@
 - Author: leostera, with AI assistance
 - Start Date: 2026-09-26
 - Updated: 2026-09-26
-- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements both the earlier synchronous `actors-v1` design and an **experimental finite, fault-free `actors-v2` slice** of this proposal. The full RFD remains unimplemented.
+- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements the generic `actors-v2` core, including bounded message observations and independent scheduler tests; the earlier synchronous `actors-v1` remains a regression profile. [Acceptance checklist](RFD0002-implementation-checklist.md) records completed core work and remaining adapter/release gates.
 
 ## Summary
 
 Use one `actor` declaration for both actors with and without retained state. A stateful actor's `init(args)` produces its initial state; its `handle_message(state, message)` computes the next state. Stateless actors omit `init` and the state argument. Typed `send(address, message)` enqueues a one-way message and returns no reply. A caller that wants a response includes its typed address and a finite correlation ID in the message; the recipient sends a separate response. A callback's state change and outgoing messages commit together, before the recipient can process any of those messages. The first generic messaging profile has finite per-address mailboxes, no loss, duplication, transport faults, restarts, or durability. Fairness and capacity are explicit. Cloudflare Worker, Durable Object, Queue, and storage behaviors require **separate semantic adapters**; none follow from `actor` or `send`. Preserve the finite native checker, temporal properties, source-level witnesses and replay from [RFD0001](RFD0001-initial-language-and-model-checker.md).
 
-This RFD remains a **Draft**, not a stable contract. `actors-v0`, `actors-v1`, and `cf-core-v0` remain pinned to their existing meanings. The branch now implements a distinct experimental `actors-v2` slice with typed messages, finite FIFO mailboxes, bounded atomic callback commits, fairness, and replay. Dynamic-message temporal observations, fault/restart behavior, adapters, and independent validation remain unfinished.
+This RFD remains a **Draft**, not a stable product-adapter contract. `actors-v0`, `actors-v1`, and `cf-core-v0` retain their semantics. The generic `actors-v2` implementation now includes typed messages, finite FIFO mailboxes, atomic callback commits, input and bounded lifetime message observations, fairness, replay, and an independent mailbox scheduler oracle. The adapter gate below is still outstanding, and coverage-instrumented fuzzing remains a release task. Faults and restarts are explicitly excluded from this generic profile, not silently approximated or claimed complete.
 
 ## Motivation
 
@@ -81,10 +81,20 @@ invariant "a reply is not processed before the counter commits" {
 }
 cover "client receives a reply" { Client.at(User).state == Observed }
 
+property "submitted increments eventually receive a reply" {
+  forall (i in inputs(Counter)) {
+    i.submitted leads_to Client.at(User).state == Observed
+  }
+}
+property "generated replies are eventually processed" {
+  forall (m in messages(Client)) { m.sent leads_to m.processed }
+}
+
 check OneIncrement {
   semantics = "actors-v2"
   domain Int = 0..1
   mailbox_bound = 2
+  message_bound = 2
   inputs { once send(Counter.at(Main), Inc(Client.at(User), First)) }
   fairness { weak runtime.progress }
 }
@@ -92,7 +102,7 @@ check OneIncrement {
 
 `Counter.at(Main)` and `Client.at(User)` are typed `Address<Counter>` and `Address<Client>` values. `send` accepts the target's message type, not any data. The client reply is a second message, not the return value of `Inc`. `RequestId` is ordinary finite user data used for correlation: the checker never assumes an address identifies one outstanding request. A stateless actor omits `init` and handles one message without a state parameter (its callback returns `unit`). An actor with state exposes read-only `.state` to specifications only, not to another actor's handler.
 
-An external `once send(...)` is an optional, finite input. It can be chosen at most once; fairness does **not** force the environment to submit it. After it is submitted, fairness can require continuously enabled internal delivery/processing actions to progress. The cover demonstrates that the reply is reachable; it does not assert that optional input always arrives. To claim conditional liveness we need a typed view of submitted inputs; the exact temporal surface must be implemented and tested, not inferred from the old `requests(Actor.method)` inspector.
+An external `once send(...)` is an optional, finite input. It can be chosen at most once; fairness does **not** force the environment to submit it. After submission, fairness requires continuously enabled mailbox processing to progress. `inputs(Counter)` exposes those input slots; `messages(Client)` includes replies generated later. The cover establishes reachable reply processing, while the properties establish conditional liveness under the declared fairness and finite bounds. Removing fairness produces replayable starvation lassos. `requests(Actor.method)` retains its old meaning in older profiles and is rejected in `actors-v2`.
 
 ### When does `send` happen?
 
@@ -104,7 +114,7 @@ The initial profile rejects external I/O or suspension within a state-transition
 
 ### Language surface, typing and ownership
 
-- A stateful `actor A(id: Key)` defines `init(id: Key): State` and one `handle_message(state: State, message: Message): State` in the initial profile. The key and message domains must be finite; a singleton is an actor keyed by `unit` (whether its key is written explicitly is a surface decision). `init` is pure, deterministic and evaluated once per finite address at check initialization. General `init(args)` beyond identity may be added only when the check supplies typed finite arguments and their lifecycle is specified.
+- A stateful `actor A(id: Key)` defines `init(id: Key): State` and one `handle_message(state: State, message: Message): State` in the initial profile. The key and message domains must be finite. A singleton omits `(id: Key)`, uses `init(): State`, and its declaration name is its typed address; keyed actors use `A.at(key)`. `init` is pure, deterministic and evaluated once per finite address at check initialization, after all addresses are materialized. Its parameter name may differ from the declaration's key name; transparent aliases are allowed. General check-supplied `init(args)` configuration is deferred to a separate extension; the implemented core intentionally supports identity-only initialization.
 - A stateless `actor A` defines `handle_message(message: Message): unit`; each accepted message runs with fresh locals. There is no retained state view. Additional handler methods/protocol variants are a future syntactic question: the initial message type can be an algebraic union and matched in one callback.
 - `state` is a **value parameter** for a callback, not a live state handle or a mutable global. A callback returns its next state. Ordinary pure `let` functions may compute portions of that transition. `send` is an explicit effect allowed only in callback statements (and helpers with conservatively inferred send effects); it returns `unit`. A pure helper or property may not send. Direct local recursion remains rejected in the first finite implementation.
 - `Address<A>` contains a typed actor name and finite key and may appear in records, variants, parameters and messages; it cannot grant access to `A`'s state. `send(address, message)` statically checks the actor's declared message protocol, including transitive data serializability. Owner capabilities from `actors-v1` cannot be serialized or smuggled through constructors, aliases, collections or helper returns. The new profile does not provide an owner capability to callbacks.
@@ -115,14 +125,22 @@ The initial profile rejects external I/O or suspension within a state-transition
 - Each finite actor address has an ordered pending mailbox. An external accepted input or a successful callback commit appends one message per `send`. Enqueue transitions from different actors may interleave nondeterministically; once appended, FIFO order is preserved **per target address**. The order of sends from one callback to the same address is source program order. No global ordering across distinct addresses is asserted.
 - A target may start only the head of its mailbox. In the initial profile, a complete callback (including local pure function calls and staged sends) is one atomic state transition: dequeue the head, compute and validate the next state and outbox, commit state, and append the outbox. Messages to self are appended after the active message is removed. A handler cannot process another message from its own address while its callback is running. Other addresses may proceed before or after this transition.
 - A direct external input acceptance only appends to the mailbox; it does not also run the callback. This preserves a checkable boundary between submission and processing. The initial profile excludes transport loss, duplication, timeout and crash; **absence of faults is an explicit reported assumption**, not exactly-once delivery from Cloudflare Queues or an end-to-end guarantee.
-- If processing or enqueuing would exceed a declared finite mailbox/message/turn bound or escape a finite data domain, return `INCONCLUSIVE` with the source operation and bound. Never drop the message, wrap a count, or treat a truncated graph as complete. Declare bounds in the check and trace; choose defaults only with measured fixtures. A bounded run may prove a property only for the bounded workload and state graph.
+- `mailbox_bound = N` is required (`1..4096`) and bounds pending envelopes per address. Optional `message_bound = N` (`1..4096`) bounds lifetime observation slots **per actor declaration across all its keys**, including external sends; it is not a transport retry policy or a mailbox size. If any transition would exceed a capacity, return `INCONCLUSIVE` at the source operation, never disable the action, partly commit, reuse a slot, or drop a message. Bounds appear in trace metadata and reports. With no lifetime observation bound, finite-state self-sending cycles can still be checked without retaining unbounded history. Graph/state/depth/time budgets remain CLI exploration guards, not definitions of eventuality.
 - A reply is just another `send` with a typed reply address. It may be processed only after its sender's commit. Correlation IDs are part of the modeled protocol; mismatched, duplicate and stale replies require model logic or specific failure semantics. There is no auto-generated waiting caller or response slot in `actors-v2`.
 
 ### Scheduling, fairness, properties and replay
 
 - Nondeterministic choices include optional external inputs and enabled mailbox-head processing for each address. `weak runtime.progress` applies to an individual continuously enabled internal processing action. It does not force optional external submission. FIFO and atomic turns mean the head cannot be skipped by a later message; an empty mailbox does not give rise to a fairness obligation. A self-sending cycle remains a real infinite path, subject to finite bounds and fair scheduling; a permanently blocked turn must not be misreported as merely unfair.
-- Preserve invariants at initial and post-transition states, including the state after enqueue but before dequeue and after a sender commits but before a recipient runs. Check liveness over fair infinite paths with replayable lassos. External input slots require observations such as `submitted`/`processed`; internal messages require a separate, bounded, well-defined observation mechanism. The existing `requests(Actor.method)` view is **not** silently reinterpreted to include dynamic messages; define any temporal quantification over messages explicitly and test non-vacuity.
+- Preserve invariants at initial and post-transition states, including after enqueue but before dequeue and after a sender commits but before a recipient runs. Check liveness over fair infinite paths with replayable lassos. The typed observation views below are read-only and specification-only. The existing `requests(Actor.method)` view is **not** silently reinterpreted.
 - State hashing and serialized traces include keyed state, ordered mailbox contents, input-slot status, correlation-bearing messages, profile and limits, action labels and source/check identity. Retain distinct enabled edges even if they lead to equal data states. Replay re-executes each submission and callback commit, verifies ordering, state/outbox changes, source identity, loop closure and fairness. Trace layout changes require a format bump or explicit migration; old artifacts must not be silently accepted under new semantics.
+
+### Stable observations and temporal bindings
+
+`inputs(A)` ranges over the declared external input slots for **all keys** of actor declaration `A`. Each slot has a typed `payload: Message`, `target: Address<A>`, `submitted: Bool`, and `processed: Bool`. The two flags start false and remain true once set. Submission enqueues the envelope; processing marks the slot only when its target callback commits. Processing does **not** mean a reply or any generated work was processed. A caller must express that condition using its reply protocol/state or a message observation.
+
+`messages(A)` requires `message_bound = N` and always ranges over **N stable slots**, including at initialization when no sends have occurred. Each slot has `sent`, `processed`, and `external` Boolean fields plus `payload: Option<Message>` and `target: Option<Address<A>>`. Before allocation, flags are false and the optional fields are `None`. Each enqueue allocates the next unused slot for that actor declaration, records immutable payload/target and whether it originated from an external input, and sets `sent`. Its callback commit sets `processed`. Identical payloads sent twice get distinct slots. Slots are never recycled, including after processing: otherwise a temporal binding could silently change identity. Exhaustion is inconclusive, even if every older message finished.
+
+Temporal `forall` expands over these **stable potential slots**, not the messages already present in the initial state. Thus `forall (m in messages(A)) { m.sent leads_to m.processed }` covers later internal sends rather than proving an empty quantifier. Covers establish reachable antecedents. Unused slots can produce an unreached-antecedent note; this is distinct from an empty quantifier. The lifetime bound deliberately cannot prove unbounded-message protocols by silently truncating history; unobserved finite-state cycles and input-based liveness remain available without it. Observers cannot be used in handlers or initializers, stored in user data, or sent to another actor. [`actor-missing-reply.fml`](../../examples/actor-missing-reply.fml) demonstrates why processed work is not an implicit reply: every counter message finishes, but the client still has a replayable fair liveness failure.
 
 ### Product boundaries and compatibility
 
@@ -135,11 +153,11 @@ The initial profile rejects external I/O or suspension within a state-transition
 
 A generic mailbox is an in-memory modeling abstraction, not durable actor storage and not a Queue producer/consumer. Backend profiles must specify how a callback and outbox interact with external side effects and failures; if atomic state-and-send commit is not supported by a product, the adapter **must split that operation into truthful transitions** rather than inherit the generic rule. A model may be checked against its declared generic assumptions without implying production conformance.
 
-The implementation has `actors-v0` functions/actors, `actors-v1` finite keyed actors and synchronous fault-free `call` with suspended callers, a `cf-core-v0` Worker/D1 parser shim, and a **separate experimental `actors-v2` slice** with inline handlers, one-way `send`, ordered finite mailboxes, and replay. The older profiles remain regression profiles; do not silently reinterpret `call` as `send` or `owner.set` as a returned next state. Decide separately whether to migrate legacy source, keep `worker` as a Cloudflare-only frontend, or retire it with diagnostics. The v2 trace uses format version 4; older profiles retain format 3, and artifacts are checked against their declared profile.
+The implementation has `actors-v0` functions/actors, `actors-v1` finite keyed actors and synchronous fault-free `call` with suspended callers, a `cf-core-v0` Worker/D1 parser shim, and a **separate experimental `actors-v2` slice** with inline handlers, one-way `send`, ordered finite mailboxes, and replay. The older profiles remain regression profiles; do not silently reinterpret `call` as `send` or `owner.set` as a returned next state. Keep the legacy `worker` frontend and synchronous actor profiles as frozen regression paths; they are not accepted as unified `actors-v2` declarations. Migration to v2 is explicit: replace mutable owner writes with a returned next state, replace synchronous calls with protocol messages/reply addresses, and reconsider invariants at the new atomic-turn boundaries. This is not a semantics-preserving text rewrite, so no automatic migration is offered. Trace format **5** stores envelope provenance, input completion and lifetime observation records plus both bounds; previous v2 format-4 artifacts must be regenerated and are rejected. Older profiles retain format 3.
 
 ### Security, privacy and observability
 
-Models cannot execute arbitrary host code or network operations. Enforce typed addresses, closed finite message data and non-escaping capabilities at every boundary. Guard parser nesting, elaboration, mailbox/message capacity, generated sends, graph size and artifact size. A trace can contain synthetic modeled user data, including reply addresses and messages; escape control characters in terminal output and do not collect telemetry by default. Reports prominently list fault, storage and delivery omissions.
+Models cannot execute arbitrary host code or network operations. Enforce typed addresses, closed finite message data and non-escaping capabilities at every boundary. Recursive data is rejected in v2 until an explicit depth-bound profile exists. Static guards include parser/tree nesting (128), data-type/call-graph depth (64), and expanded function cost (10,000 nodes). Runtime guards include evaluation nesting (128), individual value size/depth (4096 nodes/64 levels), and total actor addresses (4096), in addition to mailbox/history and CLI graph budgets. Runtime exhaustion is inconclusive; static unsupported syntax/elaboration is invalid. These are host-safety limits, not product guarantees. A trace can contain synthetic modeled user data, including reply addresses and messages; escape control characters in terminal output and do not collect telemetry by default. Reports prominently list fault, storage and delivery omissions.
 
 ### Implementation and validation
 
@@ -193,20 +211,19 @@ Keep the synchronous spike as the core. It is useful for fault-free direct calls
 
 ## Unresolved questions
 
-### Before acceptance
+### Generic-core decisions implemented
 
-- Confirm the chosen staged-send/atomic-commit abstraction for the generic profile and the FIFO-per-address rule. These are **proposed modeling assumptions**, not Cloudflare claims; choose different explicit profiles if a use case needs weaker guarantees.
-- Is `init(id)` enough for the first finite profile, or must `init(args)` accept check-supplied configuration? If so, define exactly which finite arguments each address receives and when they are evaluated.
-- Should stateless callbacks take only `(message)` and return `unit`, or should every actor have a uniform `unit` state parameter? This draft proposes the former.
-- Is one `handle_message` method over an algebraic message type sufficient initially? How should errors or rejected messages appear in the protocol rather than being silently swallowed?
-- Decide whether a syntactic singleton omits its `unit` key, whether `Address<ActorName>` remains the address type, and whether the old `worker` shim becomes a Cloudflare frontend, a migration tool, or is removed.
+- FIFO per address, one non-suspending turn at a time, with state and staged sends committed together. These are generic modeling assumptions, not Cloudflare claims.
+- Identity-only `init`, with no arguments for singletons. Stateless callbacks take only the message and return `unit`; keyed stateless mailboxes are supported too.
+- One exhaustive `handle_message` over an algebraic message type. Application rejection is explicit protocol data; unsupported types/effects and missing branches are errors, not discarded messages.
+- `Address<ActorName>` remains the transferable reference. Singleton names are addresses. Legacy `worker` and synchronous profiles remain frozen regression frontends, with explicit non-mechanical migration.
+- Stable input and optional lifetime message observations as specified above. Processing action IDs are derived from typed target addresses (not growing sequence numbers); FIFO plus weak fairness ensures each queued head progresses. Envelope source spans and observation/input identities are retained for replay.
 
-### During implementation
+### Remaining acceptance work
 
-- Specify input and internal-message observation types, including temporal quantification over dynamically generated messages without checking only an initial snapshot.
-- Specify source-stable action IDs, mailbox/message canonicalization, bound accounting, replay format and fairness for identical messages and send-to-self cycles.
-- Audit transitive send effects, constructor/alias/collection non-escape, integer domains, early returns, match exhaustiveness and malformed artifacts. Add independent tiny-model oracles before calling the profile stable.
-- Decide where backend adapters are registered versus keeping D1 built in under `cf-core-v0`.
+- The separate product-adapter gate in implementation step 5 is not implemented. Specify and independently validate Worker/DO suspension, storage/restart/gate rules and Queue attempt/ack/retry rules before introducing those profiles. Decide adapter registration then; D1 remains built in under `cf-core-v0`.
+- Run coverage-instrumented source/replay fuzz campaigns on a nightly toolchain and review this profile before treating the draft as stable. The local smoke runs use stable libFuzzer binaries without coverage instrumentation and do not satisfy this gate.
+- Independent mailbox and temporal oracles, negative effect/capability tests, and replay checks improve confidence but are not a proof of checker correctness. Keep their corpora reproducible as the language evolves.
 
 ### Out of scope
 

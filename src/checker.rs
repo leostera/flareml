@@ -130,6 +130,14 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
             } else {
                 "actor-to-actor calls, per-key instances, restarts, queues, and persistence beyond D1 are not modeled".into()
             },
+            if let Some(bound) = p.check.message_bound {
+                format!(
+                    "message observations: {bound} lifetime slots per actor declaration, including external sends; no slot reuse; exhaustion is inconclusive"
+                )
+            } else {
+                "no lifetime message history selected; external input observations remain finite"
+                    .into()
+            },
             "exact state equality; no symmetry or partial-order reduction".into(),
         ],
         states: 0,

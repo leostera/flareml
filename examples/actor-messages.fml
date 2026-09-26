@@ -33,10 +33,27 @@ invariant "reply cannot be processed before the counter commits" {
 }
 cover "client receives reply" { Client.at(User).state == Observed }
 
+property "submitted increments eventually receive a reply" {
+  forall (i in inputs(Counter)) {
+    i.submitted leads_to Client.at(User).state == Observed
+  }
+}
+
+property "generated replies are eventually processed" {
+  forall (m in messages(Client)) {
+    m.sent leads_to m.processed
+  }
+}
+
+cover "a reply was generated internally" {
+  exists (m in messages(Client)) { m.sent && !m.external }
+}
+
 check OneIncrement {
   semantics = "actors-v2"
   domain Int = 0..1
   mailbox_bound = 2
+  message_bound = 2
   inputs { once send(Counter.at(Main), Inc(Client.at(User), First)) }
   fairness { weak runtime.progress }
 }

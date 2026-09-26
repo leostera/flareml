@@ -131,6 +131,84 @@ fn keyed_actor_trace_roundtrips_through_cli_json() {
     assert_eq!(result["status"], "REPLAY_VALIDATED");
 }
 #[test]
+fn async_liveness_and_format_five_replay_through_public_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("messages.fml");
+    let trace = dir.path().join("messages.json");
+    let good = include_str!("../examples/actor-messages.fml");
+    for (text, code) in [
+        (good.to_owned(), 0),
+        (good.replace("fairness { weak runtime.progress }", ""), 1),
+    ] {
+        fs::write(&source, text).unwrap();
+        let out = fml(&[
+            "--color",
+            "always",
+            "check",
+            source.to_str().unwrap(),
+            "--format",
+            "json",
+            "--trace-out",
+            trace.to_str().unwrap(),
+        ]);
+        assert_eq!(
+            out.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(!out.stdout.contains(&0x1b));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(report["semantics"], "actors-v2");
+        let mut artifact: serde_json::Value =
+            serde_json::from_slice(&fs::read(&trace).unwrap()).unwrap();
+        assert_eq!(artifact["format_version"], 5);
+        assert_eq!(artifact["message_bound"], 2);
+        if code == 1 {
+            assert!(artifact["loop_start"].is_number());
+        }
+        let replay = fml(&[
+            "replay",
+            source.to_str().unwrap(),
+            trace.to_str().unwrap(),
+            "--format",
+            "json",
+        ]);
+        assert_eq!(
+            replay.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&replay.stdout)
+        );
+        artifact["format_version"] = 4.into();
+        fs::write(&trace, serde_json::to_vec(&artifact).unwrap()).unwrap();
+        assert_eq!(
+            fml(&[
+                "replay",
+                source.to_str().unwrap(),
+                trace.to_str().unwrap(),
+                "--format",
+                "json"
+            ])
+            .status
+            .code(),
+            Some(4)
+        );
+    }
+    fs::write(&source, good).unwrap();
+    let plain = Command::new(env!("CARGO_BIN_EXE_fml"))
+        .env("NO_COLOR", "1")
+        .args(["check", source.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(plain.status.success());
+    assert!(!plain.stdout.contains(&0x1b));
+    let colored = fml(&["--color", "always", "check", source.to_str().unwrap()]);
+    assert!(colored.status.success());
+    assert!(colored.stdout.contains(&0x1b));
+}
+
+#[test]
 fn malformed_trace_is_tool_error() {
     let dir = tempfile::tempdir().unwrap();
     let trace = dir.path().join("bad.json");

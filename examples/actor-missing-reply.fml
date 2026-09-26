@@ -1,0 +1,45 @@
+// Intentional protocol bug: returning a new state does not send a reply.
+// Even weak progress cannot deliver a message the protocol never sends.
+type ClientState = Idle | Waiting | Finished
+type ClientMessage = Start | Counted(Int)
+type CounterMessage = Inc(Address<Client>)
+
+actor Client {
+  init(): ClientState { Idle }
+  handle_message(state: ClientState, message: ClientMessage): ClientState {
+    match message {
+      | Start -> {
+          send(Counter, Inc(Client))
+          Waiting
+        }
+      | Counted(_) -> Finished
+    }
+  }
+}
+
+actor Counter {
+  init(): Int { 0 }
+  handle_message(state: Int, message: CounterMessage): Int {
+    match message {
+      // BUG: no send(reply_to, Counted(next)) before returning next.
+      | Inc(reply_to) -> state + 1
+    }
+  }
+}
+
+property "a waiting client eventually receives its reply" {
+  Client.state == Waiting leads_to Client.state == Finished
+}
+property "counter messages do finish processing" {
+  forall (m in messages(Counter)) { m.sent leads_to m.processed }
+}
+cover "the counter commits" { Counter.state == 1 }
+
+check MissingReply {
+  semantics = "actors-v2"
+  domain Int = 0..1
+  mailbox_bound = 1
+  message_bound = 1
+  inputs { once send(Client, Start) }
+  fairness { weak runtime.progress }
+}

@@ -18,7 +18,7 @@ fn asynchronous_reply_is_a_separate_turn_after_commit() {
     assert_eq!(report.status, Status::VerifiedInScope);
     assert!(report.assumptions.iter().any(|a| a.contains("not durable")));
     let trace = report.witness().unwrap();
-    assert_eq!(trace.format_version, 4);
+    assert_eq!(trace.format_version, 5);
     assert_eq!(trace.actions.len(), 3);
     assert!(!trace.actions[0].fair); // environment is optional
     assert!(trace.actions[1].description.contains("enqueue 1 message"));
@@ -29,7 +29,7 @@ fn asynchronous_reply_is_a_separate_turn_after_commit() {
     );
     trace.validate(REPLY, &program).unwrap();
     let mut old = trace.clone();
-    old.format_version = 3;
+    old.format_version = 4;
     assert!(old.validate(REPLY, &program).is_err());
     let mut altered_bound = trace.clone();
     altered_bound.mailbox_bound = Some(1);

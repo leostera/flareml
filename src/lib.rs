@@ -1,10 +1,12 @@
 //! FlareML's native model-checking pipeline.
 pub mod checker;
 pub mod diagnostics;
+mod evaluation;
 mod functions;
 pub mod graph;
 mod messaging;
 pub mod model;
+mod observations;
 pub mod semantics;
 pub mod syntax;
 pub mod temporal;

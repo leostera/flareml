@@ -218,6 +218,8 @@ pub struct Check {
     pub domains: BTreeMap<String, Vec<Expr>>,
     pub fair: bool,
     pub mailbox_bound: Option<usize>,
+    /// Optional lifetime observation slots per actor declaration, never reused.
+    pub message_bound: Option<usize>,
     pub span: Span,
 }
 #[derive(Clone, Debug, Default)]
@@ -468,7 +470,12 @@ impl Parser {
             }
         };
         let mut lhs = Expr { kind, span };
+        let mut chain = 0;
         loop {
+            chain += 1;
+            if chain > 128 {
+                return self.err("expression chain nesting limit exceeded");
+            }
             if self.at(".") && 10 >= min {
                 self.take();
                 let n = self.name()?;
@@ -514,6 +521,34 @@ impl Parser {
                 kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
                 span,
             };
+        }
+        // Pratt parsing's loop can build a deep left spine without recursive
+        // parser calls. Bound the resulting tree too, before recursive passes.
+        let mut pending = vec![(&lhs, 0)];
+        while let Some((expr, depth)) = pending.pop() {
+            if depth > 128 {
+                return self.err("expression tree nesting limit exceeded");
+            }
+            match &expr.kind {
+                ExprKind::Field(x, _) | ExprKind::Unary(_, x) => pending.push((x, depth + 1)),
+                ExprKind::Binary(_, a, b) => {
+                    pending.push((a, depth + 1));
+                    pending.push((b, depth + 1));
+                }
+                ExprKind::Call(f, args) => {
+                    pending.push((f, depth + 1));
+                    pending.extend(args.iter().map(|x| (x, depth + 1)));
+                }
+                ExprKind::Record(_, fields) => {
+                    pending.extend(fields.values().map(|x| (x, depth + 1)))
+                }
+                ExprKind::List(xs) => pending.extend(xs.iter().map(|x| (x, depth + 1))),
+                ExprKind::Quant { domain, body, .. } => {
+                    pending.push((domain, depth + 1));
+                    pending.push((body, depth + 1));
+                }
+                _ => {}
+            }
         }
         lhs.span.end = self.tokens[self.i.saturating_sub(1)].span.end;
         self.depth -= 1;
@@ -774,6 +809,7 @@ impl Parser {
                 let mut initializer = None;
                 let mut handler = None;
                 while !self.eat("}") {
+                    let method_span = self.token().span;
                     let method = self.name()?;
                     if method != "init" && method != "handle_message" {
                         return self.err("actors-v2 supports only init and handle_message");
@@ -805,7 +841,7 @@ impl Parser {
                         params,
                         output,
                         body,
-                        span,
+                        span: method_span,
                     });
                     self.eat(";");
                 }
@@ -911,6 +947,7 @@ impl Parser {
                     domains: BTreeMap::new(),
                     fair: false,
                     mailbox_bound: None,
+                    message_bound: None,
                     span,
                 };
                 let mut sections = std::collections::BTreeSet::new();
@@ -1025,19 +1062,26 @@ impl Parser {
                                 });
                             }
                         }
-                        "mailbox_bound" => {
+                        "mailbox_bound" | "message_bound" => {
                             self.expect("=")?;
                             let token = self.take();
                             let n = token.text.parse::<usize>().map_err(|_| {
-                                Error::new(token.span, "mailbox_bound requires a positive integer")
+                                Error::new(
+                                    token.span,
+                                    format!("{section} requires a positive integer"),
+                                )
                             })?;
                             if n == 0 || n > 4096 {
                                 return Err(Error::new(
                                     token.span,
-                                    "mailbox_bound must be 1..4096",
+                                    format!("{section} must be 1..4096"),
                                 ));
                             }
-                            c.mailbox_bound = Some(n);
+                            if section == "mailbox_bound" {
+                                c.mailbox_bound = Some(n);
+                            } else {
+                                c.message_bound = Some(n);
+                            }
                         }
                         "fairness" => {
                             self.expect("{")?;
