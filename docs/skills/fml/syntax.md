@@ -19,7 +19,7 @@ type Phase = Idle | Done
 let increment = (n: Int): Int { n + 1 }
 ```
 
-Types are closed variants, record variants, or transparent named aliases; variant payloads can be positional (`Deposit(1)`) or record fields (`Route { recipient: Account.at(Alice), amount: 1 }`). Built-ins: `Bool` (`true`, `false`), `Int`, `String`, `unit` (`()`), `Option<T>` (`Some(x)`, `None`), `Result<T, E>` (`Ok(x)`, `Err(e)`), and `Actor<A>` (typed address to an explicitly spawned instance of A). Strings use quotes. Data cannot use recursive types or user-defined generic types. Integer and string data require explicit finite literal pools in a `check`: e.g. `domain Int = 0..2`, `domain String = ["a", "b"]`. The checker validates stored values, messages, arguments, and return values against those pools; out-of-pool evaluation is inconclusive, not overflow/wrapping or silent pruning.
+Types are closed variants, record variants, or transparent named aliases; variant payloads can be positional (`Deposit(1)`) or record fields (`Route { recipient: account, amount: 1 }`). Built-ins: `Bool` (`true`, `false`), `Int`, `String`, `unit` (`()`), `Option<T>` (`Some(x)`, `None`), `Result<T, E>` (`Ok(x)`, `Err(e)`), and `Actor<A>` (typed address to an explicitly spawned instance of A). Strings use quotes. Data cannot use recursive types or user-defined generic types. Integer and string data require explicit finite literal pools in a `check`: e.g. `domain Int = 0..2`, `domain String = ["a", "b"]`. The checker validates stored values, messages, arguments, and return values against those pools; out-of-pool evaluation is inconclusive, not overflow/wrapping or silent pruning.
 
 ## Functions, blocks, and patterns
 
@@ -47,12 +47,12 @@ An `actor A { ... }` is a definition only. Every `check C` requires `main { ... 
 
 Expressions include literals, names, variant construction, records, field access (`value.field`), calls (`decide(request)`), lists (`[a, b]`), Boolean `!`, `&&`, `||`, `implies`, arithmetic `+`/`-`, comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, and property operators `always`, `eventually`, `reachable`, `leads_to`, `until`. `forall (x in Domain) { predicate }` and `exists (x in Domain) { predicate }` quantify **finite data**, including declared type domains or read-only `instances(A)`, `inputs(A)`, and `messages(A)` views. The latter are specification-only. `exists` is not existential quantification over execution paths; use top-level `reachable` for that.
 
-Precedence, low to high: `leads_to`/`until`; `implies`; `||`; `&&`; `==`/`!=`; ordered comparisons; `+`/`-`; prefix operators; field and call postfix operations. Prefix `always`, `eventually`, and `reachable` bind tightly: write `always (A.state == Done)` rather than `always A.state == Done`. Parenthesize mixed Boolean/temporal expressions to make the intended claim explicit. The supported temporal fragment is deliberately restricted; read `fml skills properties` before relying on temporal nesting.
+Precedence, low to high: `leads_to`/`until`; `implies`; `||`; `&&`; `==`/`!=`; ordered comparisons; `+`/`-`; prefix operators; field and call postfix operations. Prefix `always`, `eventually`, and `reachable` bind tightly: write `always (forall (a in instances(A)) { a.state == Some(Done) })` rather than leaving the operand ambiguous. Parenthesize mixed Boolean/temporal expressions to make the intended claim explicit. The supported temporal fragment is deliberately restricted; read `fml skills properties` before relying on temporal nesting.
 
 ## Common mistakes
 
 - `let x = 1` at file scope is **not** a constant declaration: top-level `let` takes typed function parameters and a body.
-- `property "p" { A.state == Done }` needs an explicit `always`, `eventually`, or top-level `reachable`.
+- `property "p" { forall (a in instances(A)) { a.state == Some(Done) } }` needs an explicit `always`, `eventually`, or top-level `reachable`.
 - `Actor<A>` is a routable address, not permission to inspect A's state from a handler. `A` itself names a definition, not an address.
 - A model requires a `check` with `mailbox_bound = N`, `main { ... }`, and `spawn_bound A = N` for each definition. `check` configures the experiment; it is not invoked as a program entry point.
 - Names of keywords cannot be reused as declarations. Keep models small and ask the checker for source-mapped errors rather than guessing syntax.

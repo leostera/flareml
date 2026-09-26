@@ -1,0 +1,57 @@
+<div class="fml-site-heading">
+  <a class="site-title" href="/">FlareML</a>
+  <nav class="fml-primary-nav" aria-label="Primary">
+    <a href="/guide/getting-started/">Get started</a>
+    <a href="/guide/language/">Docs</a>
+  </nav>
+</div>
+
+<style>
+  .fml-site-heading {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: clamp(1rem, 2vw, 1.75rem);
+    white-space: nowrap;
+  }
+
+  .fml-primary-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.82rem;
+  }
+
+  .fml-primary-nav a {
+    color: #393936;
+    text-decoration: none;
+  }
+
+  .fml-primary-nav a:hover {
+    color: #111;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .fml-primary-nav a:focus-visible {
+    outline: 2px solid #7135a5;
+    outline-offset: 0.2rem;
+  }
+
+  @media (max-width: 700px) {
+    .fml-site-heading {
+      gap: 0.75rem;
+    }
+
+    .fml-primary-nav {
+      gap: 0.65rem;
+      font-size: 0.72rem;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .fml-primary-nav {
+      display: none;
+    }
+  }
+</style>

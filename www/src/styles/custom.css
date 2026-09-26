@@ -1,0 +1,419 @@
+:root {
+  /* Keep Starlight's semantic palette in light mode, even when the OS prefers dark. */
+  --sl-color-white: #111110;
+  --sl-color-gray-1: #1a1a19;
+  --sl-color-gray-2: #393936;
+  --sl-color-gray-3: #6b6b66;
+  --sl-color-gray-4: #6b6b66;
+  --sl-color-gray-5: #b6b6b2;
+  --sl-color-gray-6: #e7e7e5;
+  --sl-color-gray-7: #f5f5f4;
+  --sl-color-black: #fff;
+  --sl-color-accent-low: #ededeb;
+  --sl-color-accent: #111110;
+  --sl-color-accent-high: #111110;
+  --sl-color-text: #171716;
+  --sl-color-text-accent: #111110;
+  --sl-color-text-invert: #fff;
+  --sl-color-bg: #fff;
+  --sl-color-bg-nav: #fff;
+  --sl-color-bg-sidebar: #fff;
+  --sl-color-bg-inline-code: #f5f5f4;
+  --sl-color-bg-accent: #111110;
+  --sl-color-hairline-light: #e7e7e5;
+  --sl-color-hairline: #e7e7e5;
+  --sl-color-hairline-shade: #f5f5f4;
+  --sl-color-backdrop-overlay: rgb(0 0 0 / 66%);
+  --sl-font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --sl-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+
+body {
+  background: #fff;
+  letter-spacing: -0.01em;
+}
+
+header.header {
+  border-bottom: 1px solid var(--sl-color-gray-6);
+  box-shadow: none;
+}
+
+header.header starlight-theme-select {
+  display: none;
+}
+
+.site-title {
+  color: #111;
+  font-family: var(--sl-font-mono);
+  font-size: 0.88rem;
+  font-weight: 650;
+  letter-spacing: -0.06em;
+  text-decoration: none;
+}
+
+.site-title:hover {
+  color: #111;
+  text-decoration: none;
+}
+
+[data-has-hero] main {
+  padding-inline: clamp(1.25rem, 5vw, 5rem);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: clamp(1.75rem, 3.5vw, 3.5rem);
+  min-height: calc(100svh - 4rem);
+  box-sizing: border-box;
+  padding-block: clamp(1.75rem, 5vh, 3.75rem);
+  text-align: left;
+}
+
+.hero > .stack {
+  order: 1;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.hero > .stack .copy {
+  align-items: flex-start;
+}
+
+.hero > .hero-html {
+  order: 2;
+  width: 100%;
+  max-width: 34rem;
+  height: auto;
+  margin: 0;
+}
+
+.hero h1 {
+  max-width: 14ch;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(3.25rem, 6.3vw, 5.8rem);
+  font-weight: 400;
+  letter-spacing: -0.075em;
+  line-height: 0.94;
+}
+
+.hero .tagline {
+  max-width: 43rem;
+  margin-top: 1.5rem;
+  color: var(--sl-color-gray-2);
+  font-size: clamp(1rem, 1.5vw, 1.2rem);
+  line-height: 1.65;
+}
+
+.hero .actions {
+  justify-content: flex-start;
+  margin-top: 2rem;
+}
+
+.hero .actions .primary {
+  border: 1px solid #111;
+  border-radius: 0;
+  background: #111;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.fml-hero-demo {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid #dededb;
+  background: #fff;
+  box-shadow: 0 18px 55px rgb(17 17 16 / 9%), 0 2px 7px rgb(17 17 16 / 5%);
+  color: #171716;
+  text-align: left;
+}
+
+.fml-demo-toolbar {
+  display: flex;
+  height: 2.35rem;
+  align-items: center;
+  gap: 0.7rem;
+  padding-inline: 0.8rem;
+  border-bottom: 1px solid #e7e7e5;
+  background: #f7f7f6;
+  color: #66665f;
+  font-family: var(--sl-font-mono);
+  font-size: 0.61rem;
+}
+
+.fml-demo-dots {
+  display: inline-flex;
+  gap: 0.24rem;
+}
+
+.fml-demo-dots i {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: #c5c5c0;
+}
+
+.fml-demo-tag {
+  margin-left: auto;
+  color: #73736d;
+  font-size: 0.52rem;
+  letter-spacing: 0.08em;
+}
+
+.fml-demo-source {
+  overflow-x: auto;
+  margin: 0;
+  padding: 0.85rem 0.9rem 0.95rem;
+  background: #fff;
+  color: #272725;
+  font-family: var(--sl-font-mono);
+  font-size: clamp(0.72rem, 0.8vw, 0.76rem);
+  line-height: 1.48;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.fml-demo-source code {
+  font: inherit;
+}
+
+.tok-keyword { color: #7135a5; font-weight: 700; }
+.tok-temporal { color: #b4235a; font-weight: 700; }
+.tok-type { color: #005b96; font-weight: 700; }
+.tok-actor,
+.tok-constructor { color: #00695c; font-weight: 700; }
+.tok-function { color: #0f766e; font-weight: 700; }
+.tok-string { color: #9a3412; }
+.tok-number { color: #8a5a00; }
+.tok-operator { color: #b4235a; font-weight: 700; }
+.tok-variable { color: #a13d08; }
+.tok-comment { color: #686875; font-style: italic; }
+
+.fml-demo-explorer {
+  padding: 0.7rem 0.85rem 0.8rem;
+  border-top: 1px solid #e7e7e5;
+  background: #fafaf9;
+}
+
+.fml-demo-explorer-heading,
+.fml-demo-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--sl-font-mono);
+}
+
+.fml-demo-explorer-heading {
+  color: #686875;
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+}
+
+.fml-demo-states {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fml-demo-states::before {
+  position: absolute;
+  top: 1rem;
+  bottom: 1rem;
+  left: 0.78rem;
+  width: 1px;
+  background: #dededb;
+  content: "";
+}
+
+.fml-demo-state {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.55rem minmax(5.5rem, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 1.85rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid transparent;
+  background: #fff;
+  animation: fml-state-active 6s ease-in-out infinite;
+}
+
+.fml-demo-state-initial { animation-delay: 0s; }
+.fml-demo-state-queued { animation-delay: 2s; }
+.fml-demo-state-final {
+  animation: fml-state-failure 6s ease-in-out infinite;
+  animation-delay: 4s;
+}
+
+.fml-demo-state-number {
+  display: grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  place-items: center;
+  border: 1px solid #c8c8c3;
+  border-radius: 50%;
+  background: #fff;
+  color: #686875;
+  font-family: var(--sl-font-mono);
+  font-size: 0.56rem;
+}
+
+.fml-demo-state-label {
+  color: #393936;
+  font-size: 0.65rem;
+  font-weight: 550;
+}
+
+.fml-demo-state code {
+  justify-self: end;
+  color: #005b96;
+  font-family: var(--sl-font-mono);
+  font-size: 0.58rem;
+  white-space: nowrap;
+}
+
+.fml-demo-verdict {
+  justify-content: flex-start;
+  margin-top: 0.65rem;
+  color: #b42318;
+  font-size: 0.58rem;
+}
+
+.fml-demo-verdict > span {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.fml-demo-verdict-text {
+  color: #b42318;
+  font-family: var(--sl-font-mono);
+}
+
+.fml-demo-verdict strong {
+  margin-left: auto;
+  font-size: 0.51rem;
+  letter-spacing: 0.045em;
+}
+
+@keyframes fml-state-active {
+  0%, 15% {
+    transform: translateX(2px);
+    border-color: #7135a5;
+    background: #f6f0fb;
+    box-shadow: 0 2px 8px rgb(113 53 165 / 12%);
+  }
+  18%, 100% {
+    transform: translateX(0);
+    border-color: transparent;
+    background: #fff;
+    box-shadow: none;
+  }
+}
+
+@keyframes fml-state-failure {
+  0%, 15% {
+    transform: translateX(2px);
+    border-color: #b42318;
+    background: #fff1f0;
+    box-shadow: 0 2px 8px rgb(180 35 24 / 12%);
+  }
+  18%, 100% {
+    transform: translateX(0);
+    border-color: transparent;
+    background: #fff;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fml-demo-state {
+    animation: none;
+  }
+
+  .fml-demo-state-final {
+    border-color: #b42318;
+    background: #fff1f0;
+  }
+}
+
+.sl-markdown-content > .sl-heading-wrapper.level-h1:first-child {
+  display: none;
+}
+
+.sl-markdown-content :is(h1, h2, h3) {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  letter-spacing: -0.04em;
+}
+
+.sl-markdown-content a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.sl-markdown-content :not(pre) > code {
+  border: 1px solid var(--sl-color-gray-6);
+  border-radius: 0;
+  background: #f8f8f7;
+}
+
+@media (max-width: 700px) {
+  .hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+    min-height: calc(100svh - 4rem);
+    padding-block: 0.75rem 1rem;
+  }
+
+  .hero > .stack {
+    gap: 0.75rem;
+  }
+
+  .hero > .stack .copy {
+    gap: 0.5rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.25rem, 10.5vw, 3rem);
+  }
+
+  .hero .tagline {
+    margin-top: 0.35rem;
+    font-size: 0.92rem;
+    line-height: 1.4;
+  }
+
+  .hero .actions {
+    gap: 0.35rem 0.8rem;
+    margin-top: 0.5rem;
+  }
+
+  .fml-demo-explorer {
+    padding: 0.5rem 0.65rem 0.6rem;
+  }
+
+  .fml-demo-states {
+    margin-top: 0.35rem;
+  }
+
+  .fml-demo-state {
+    min-height: 1.7rem;
+  }
+
+  .fml-demo-source {
+    font-size: 0.66rem;
+    line-height: 1.4;
+  }
+
+}

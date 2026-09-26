@@ -1,0 +1,48 @@
+---
+title: FlareML
+description: Find design bugs before implementation by sketching how program components interact.
+template: splash
+hero:
+  title: Find bugs before you write the program.
+  tagline: >-
+    FlareML is a small language for sketching how a program's parts interact (actors, threads, databases, microservices, and more) and finding design bugs before you write the code.
+  image:
+    html: |
+      <div class="fml-hero-demo" role="group" aria-label="A small FML model excerpt and its missing-reply counterexample">
+        <div class="fml-demo-window">
+          <div class="fml-demo-toolbar">
+            <span class="fml-demo-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>missing-reply.fml</span>
+            <span class="fml-demo-tag">MODEL EXCERPT</span>
+          </div>
+          <pre class="fml-demo-source"><code><span class="tok-keyword">actor</span> <span class="tok-actor">Service</span> {
+        <span class="tok-keyword">handle_message</span>(request: <span class="tok-type">Request</span>): <span class="tok-type">unit</span> {
+          () <span class="tok-comment">// no reply</span>
+        }
+      }
+
+      <span class="tok-keyword">property</span> <span class="tok-string">&quot;a reply eventually arrives&quot;</span> {
+        <span class="tok-keyword">forall</span> (input in <span class="tok-function">inputs</span>(Service)) {
+          input.submitted <span class="tok-temporal">leads_to</span>
+            <span class="tok-keyword">exists</span> (client in <span class="tok-function">instances</span>(Client)) {
+              client.state <span class="tok-operator">==</span> <span class="tok-constructor">Some</span>(Done)
+            }
+        }
+      }</code></pre>
+        </div>
+        <div class="fml-demo-explorer">
+          <div class="fml-demo-explorer-heading"><span>WHAT GOES WRONG</span><span>MISSING REPLY</span></div>
+          <ol class="fml-demo-states" aria-hidden="true">
+            <li class="fml-demo-state fml-demo-state-initial"><span class="fml-demo-state-number">01</span><span class="fml-demo-state-label">Request submitted</span><code>Service mailbox: 1</code></li>
+            <li class="fml-demo-state fml-demo-state-queued"><span class="fml-demo-state-number">02</span><span class="fml-demo-state-label">Service handles it</span><code>No reply sent</code></li>
+            <li class="fml-demo-state fml-demo-state-final"><span class="fml-demo-state-number">03</span><span class="fml-demo-state-label">Client keeps waiting</span><code>state: Waiting</code></li>
+          </ol>
+          <div class="fml-demo-verdict"><span aria-hidden="true">×</span><span class="fml-demo-verdict-text">request gets a reply</span><strong>BUG FOUND</strong></div>
+        </div>
+      </div>
+  actions:
+    - text: Get started
+      link: /guide/getting-started/
+      icon: right-arrow
+      variant: primary
+---

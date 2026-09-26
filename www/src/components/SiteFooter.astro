@@ -1,0 +1,34 @@
+---
+// Starlight resolves this component path at build time, but its exports lack Astro module types.
+// @ts-expect-error
+import DefaultFooter from '@astrojs/starlight/components/Footer.astro';
+---
+
+<DefaultFooter />
+<div class="site-credit">
+  <span>built with &lt;3 by&nbsp;</span>
+  <a href="https://github.com/leostera">@leostera</a>
+</div>
+
+<style>
+  .site-credit {
+    display: flex;
+    justify-content: center;
+    padding: 0.85rem 0 1.75rem;
+    border-top: 1px solid var(--sl-color-gray-6);
+    color: var(--sl-color-gray-4);
+    font-family: var(--sl-font-mono);
+    font-size: var(--sl-text-xs);
+  }
+
+  .site-credit a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .site-credit a:hover {
+    color: #111;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+</style>
