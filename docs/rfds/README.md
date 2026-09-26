@@ -5,6 +5,6 @@ RFDs record proposed and accepted design decisions for FlareML. A draft is not a
 | RFD | Status | Summary |
 | --- | --- | --- |
 | [0001 - Initial language and model checker](RFD0001-initial-language-and-model-checker.md) | Draft | Initial Cloudflare-first syntax, Rust CLI, invariant and temporal checking, finite scopes, and replayable counterexamples. |
-| [0002 - Functions and actors as the modeling core](RFD0002-functions-and-actors.md) | Draft | Proposes functions and stateless/stateful actors as the generic core, with versioned product-specific semantics. |
+| [0002 - Functions and actors as the modeling core](RFD0002-functions-and-actors.md) | Draft | Proposes one state-in/state-out actor form and typed asynchronous `send`, with separate versioned product-specific semantics. |
 
 Use `RFD####-lowercase-hyphenated-title.md`, allocating the next unused number. Preserve existing numbers. Keep design rationale in the RFD; track implementation progress separately when needed.

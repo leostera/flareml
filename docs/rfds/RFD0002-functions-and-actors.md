@@ -6,283 +6,212 @@
 - Author: leostera, with AI assistance
 - Start Date: 2026-09-26
 - Updated: 2026-09-26
-- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` (`actors-v1` vertical slice; proposal not fully implemented)
+- Implementation: [actor-generalization spike](../spikes/actor-generalization.md) on `spike/actor-generalization` implements the **earlier**, synchronous `actors-v1` design; the asynchronous design below is **not implemented**.
 
 ## Summary
 
-Make typed functions and actors the general modeling core of FML. Functions describe computations and explicit effects; actor declarations bind those functions to identities, protocols, and optional owned state. A stateless actor has independent invocations; a stateful actor owns a value per modeled identity. Neither term implies a Cloudflare Worker, Durable Object, persistence, or an atomic handler. Product-specific semantics remain separate, versioned profiles/adapters that must specify their operations rather than being inferred from the generic actor keyword. Preserve the native checker, finite-scope and temporal-property contracts from [RFD0001](RFD0001-initial-language-and-model-checker.md). Extend the working spike vertically: typed addresses, calls with suspended continuations, independently scheduled keyed instances, and replayable counterexamples. This RFD proposes the target contract; it does not claim those extensions are already implemented.
+Use one `actor` declaration for both actors with and without retained state. A stateful actor's `init(args)` produces its initial state; its `handle_message(state, message)` computes the next state. Stateless actors omit `init` and the state argument. Typed `send(address, message)` enqueues a one-way message and returns no reply. A caller that wants a response includes its typed address and a finite correlation ID in the message; the recipient sends a separate response. A callback's state change and outgoing messages commit together, before the recipient can process any of those messages. The first generic messaging profile has finite per-address mailboxes, no loss, duplication, transport faults, restarts, or durability. Fairness and capacity are explicit. Cloudflare Worker, Durable Object, Queue, and storage behaviors require **separate semantic adapters**; none follow from `actor` or `send`. Preserve the finite native checker, temporal properties, source-level witnesses and replay from [RFD0001](RFD0001-initial-language-and-model-checker.md).
+
+This is a **proposal to replace the experimental synchronous actor surface**, not a description of the present checker. `actors-v0`, `actors-v1`, and `cf-core-v0` remain pinned to their existing meanings. A new profile (provisionally `actors-v2`) must be created and tested before any asynchronous actor model can be checked.
 
 ## Motivation
 
-RFD0001 starts from a Cloudflare-native vocabulary and an initial Worker/D1 implementation. The [first checkpoint](../../README.md) checks real `.fml` source and catches a login bug and a D1 lost update. But declaring every handler inside `worker` or `durable` entangles the *behavior being modeled* with its *execution environment*. This makes reuse, ordinary pure functions, and non-Cloudflare systems awkward. It also suggests incorrectly that a named Worker is a long-lived actor, or that a Durable Object handler is atomic end-to-end.
+The initial Worker/D1 checker treats product-named handlers as the whole modeling vocabulary. The [spike](../spikes/actor-generalization.md) introduced typed functions, `stateless actor` and `stateful actor`, a scoped `Actor<State>` capability, finite keyed identities and `call(address.method, message)` with a waiting caller. This works as an experimental vertical slice, but it makes state ownership look like a different *kind* of actor, and presents direct synchronous RPC as the general communication primitive. That is a poor fit for message-driven systems where a request can carry a reply address and the sender need not wait.
 
-The branch spike has working top-level functions, stateless actors, and single-instance stateful actors. It validates the direction: [`actor-stateless.fml`](../../examples/actor-stateless.fml) checks a reusable decision function without Cloudflare resources; [`actor-counter.fml`](../../examples/actor-counter.fml) finds a state invariant failure and replays it. At drafting the spike was **not** yet a general actor calculus: one stateful instance per name, no inter-actor calls, no address protocol, no restarts or persistence. The subsequent `actors-v1` slice adds finite keyed identities and direct fault-free calls, and first-class `Address<ActorName>` values, but still has no restart or persistence semantics. Its `worker`/`cf-core-v0` parser shim exists to retain old tests, not to determine the eventual public surface.
-
-We need a design that makes the boundaries teachable and checkable: what runs locally, who owns state, how actors are addressed, what crosses a message boundary, when another invocation can run, and which properties have actually been established.
+The desired mental model is closer to an asynchronous receive loop: the actor owns one state per identity, processes messages under a typed protocol, and explicitly sends further messages. A handler is a state transition, not an application implementation or an automatically atomic distributed transaction. The language should make reply routing, message correlation, state commits, and assumptions about progress visible to the checker.
 
 ## Goals
 
-- Separate function definition from actor binding, and allow reuse of pure computations in handlers and specifications under explicit effect rules.
-- Define typed, finite actor identities and request/reply protocols; support both named stateless services and keyed stateful instances.
-- Preserve direct source-to-checker execution, explicit scheduling/fairness, state-by-state invariants, liveness lassos, and replay.
-- Keep actor state and input-slot/continuation identity in state hashing and trace evidence.
-- Make backend mappings (Worker, Durable Object, Queue, D1) visible, versioned semantic choices without making `worker` a *core* language construct or collapsing distinct product contracts.
-- Retain a safe, explicit migration path for RFD0001 examples and artifacts.
+- One unbranded `actor` form. State ownership is declared by `init`; an actor without `init` has independent stateless message invocations.
+- A typed finite address and message protocol. An address can be passed in ordinary model data; an owned state value/capability cannot escape in a message.
+- A handler that consumes a state snapshot and message, returns the next state, and can stage explicit one-way `send` effects. No implicit response or hidden state mutation.
+- Specify per-address mailbox ordering, delivery, callback atomicity, backpressure/capacity, scheduling, fairness, failure omissions, and reply-before-commit behavior precisely.
+- Preserve distinct Cloudflare resource contracts and the checker's honest `VERIFIED_IN_SCOPE` / `VIOLATED` / `INCONCLUSIVE` results and replayable evidence.
+- Migrate without reinterpreting legacy source profiles or archived traces.
 
 ## Non-goals
 
-- Compiling or deploying actor models, verifying separately written production implementations, or claiming runtime conformance.
-- Inferring Cloudflare durability from `stateful`; inferring exactly-once delivery, a queue mailbox, or global ordering from `actor`.
-- Arbitrary recursion, higher-order closures, unbounded identities/messages, general distributed transactions, or an unbounded proof engine in this phase.
-- A generic `Store` that erases D1/KV/R2 behavior, or a general function-library facility for inventing unvalidated resource guarantees.
-- Silent fallback when an address, effect, profile, capacity, or failure behavior is unsupported.
+- An automatically generated `handle_call` RPC or reply channel in the first asynchronous profile. Application protocols carry reply addresses and correlation IDs explicitly.
+- Runtime deployment, automatic conformance with production code, supervision, process linking, arbitrary spawning, timers, crashes, or retry semantics in the generic profile.
+- Treating generic actor mailboxes as Cloudflare Queues, or retained generic state as Durable Object storage.
+- Unbounded identities, messages, mailboxes, recursion, or proofs. A finite bound is a modeling scope, not a production guarantee.
+- Changing the meaning of existing `actors-v0`, `actors-v1`, or `cf-core-v0` files under the same profile string.
 
 ## Guide-level explanation
 
-### Functions compute; actors own boundaries
+### Actors receive messages and return state
 
-An illustrative source file, **working now** on the spike branch:
+**Illustrative target syntax: not accepted by the current parser.** Types and addresses are finite, and `send` is not a function that waits for a result:
 
 ```fml
-type Eligibility = Eligible | Ineligible
-type Request = Request { eligible: Eligibility }
-type Reply = Allowed | Denied
+type CounterId = Main
+type ClientId = User
+type RequestId = First
 
-let decision = (eligible: Eligibility): Reply {
-  match eligible {
-    | Eligible -> Allowed
-    | Ineligible -> Denied
+type CounterMessage = Inc(Address<Client>, RequestId)
+type ClientMessage = Counted(RequestId, Int)
+type ClientState = Waiting | Observed
+
+actor Counter(id: CounterId) {
+  init(id: CounterId): Int { 0 }
+
+  handle_message(state: Int, message: CounterMessage): Int {
+    match message {
+      | Inc(reply_to, request_id) -> {
+          let next = state + 1
+          send(reply_to, Counted(request_id, next))
+          next
+        }
+    }
   }
 }
 
-let login = (request: Request): Reply {
-  decision(request.eligible)
-}
+actor Client(id: ClientId) {
+  init(id: ClientId): ClientState { Waiting }
 
-stateless actor API {
-  handle_request = login
-}
-
-invariant "ineligible users cannot log in" {
-  forall (r in requests(API.handle_request)) {
-    r.response == Some(Allowed) implies r.input.eligible == Eligible
+  handle_message(state: ClientState, message: ClientMessage): ClientState {
+    match message {
+      | Counted(_, _) -> Observed
+    }
   }
 }
 
-property "accepted requests eventually return" {
-  forall (r in requests(API.handle_request)) {
-    r.accepted leads_to r.completed
-  }
+invariant "a reply is not processed before the counter commits" {
+  Client.at(User).state == Observed implies Counter.at(Main).state == 1
 }
+cover "client receives a reply" { Client.at(User).state == Observed }
 
-check Login {
-  semantics = "actors-v0"
-  inputs {
-    once API.handle_request(Request { eligible: Eligible })
-    once API.handle_request(Request { eligible: Ineligible })
-  }
+check OneIncrement {
+  semantics = "actors-v2" // proposed, not implemented
+  domain Int = 0..1
+  inputs { once send(Counter.at(Main), Inc(Client.at(User), First)) }
   fairness { weak runtime.progress }
 }
 ```
 
-The function bodies use ML-shaped types, `match`, and a trailing result expression. The actor binds an entrypoint to a function; it does not copy or magically execute the function in a new process. `requests(...)` observes finite input slots, including those not yet accepted. `once` creates one optional input each. Fairness applies to continuously enabled modeled progress actions, not to optional input arrival.
+`Counter.at(Main)` and `Client.at(User)` are typed `Address<Counter>` and `Address<Client>` values. `send` accepts the target's message type, not any data. The client reply is a second message, not the return value of `Inc`. `RequestId` is ordinary finite user data used for correlation: the checker never assumes an address identifies one outstanding request. A stateless actor omits `init` and handles one message without a state parameter (its callback returns `unit`). An actor with state exposes read-only `.state` to specifications only, not to another actor's handler.
 
-An illustrative **working single-instance** stateful model:
+An external `once send(...)` is an optional, finite input. It can be chosen at most once; fairness does **not** force the environment to submit it. After it is submitted, fairness can require continuously enabled internal delivery/processing actions to progress. The cover demonstrates that the reply is reachable; it does not assert that optional input always arrives. To claim conditional liveness we need a typed view of submitted inputs; the exact temporal surface must be implemented and tested, not inferred from the old `requests(Actor.method)` inspector.
 
-```fml
-type Reply = Count(Int)
+### When does `send` happen?
 
-let increment = (owner: Actor<Int>, amount: Int): Reply {
-  owner.set(owner.state + amount)
-  Count(owner.state)
-}
+Inside a callback, `send` records an outgoing intent. It does not hand control to the target immediately. At the callback's return transition the checker validates the next state and **atomically** installs the new owned state and enqueues the staged messages, in program order. The target can first process the reply in a later transition, after the counter state is committed. If the callback cannot finish (type error or finite capacity cutoff), it does not partly commit state or partly enqueue messages. This is a **generic model rule**, not a claim that any particular external transport provides an atomic transaction.
 
-stateful actor Counter {
-  state: Int = 0
-  add = increment
-}
-
-invariant "counter never exceeds one" { Counter.state <= 1 }
-
-check Concurrent {
-  semantics = "actors-v0"
-  domain Int = 0..2
-  inputs { once Counter.add(1) once Counter.add(1) }
-  fairness { weak runtime.progress }
-}
-```
-
-`fml check examples/actor-counter.fml` reports the second call that makes `Counter.state == 2`. Here state is retained **in the model** between invocations; no claim of storage persistence or eviction behavior follows. `owner` is an owned capability, not an actor address to serialize or pass to another actor. The top-level `Counter.state` view is available to properties, not to other actors' handler code.
-
-### The next vertical example: two actors
-
-The following was **proposed syntax when this draft was written**. The branch now accepts the keyed address and call forms under the experimental `actors-v1` profile, without implying that the rest of this RFD is implemented. It illustrates why `call` cannot be treated as a local function invocation:
-
-```fml
-type AccountId = Alice | Bob
-type Reply = Balance(Int)
-
-let deposit = (owner: Actor<Int>, amount: Int): Reply {
-  owner.set(owner.state + amount)
-  Balance(owner.state)
-}
-
-stateful actor Account(id: AccountId) {
-  state: Int = 0
-  deposit = deposit
-}
-
-let send_deposit = (id: AccountId): Reply {
-  call(Account.at(id).deposit, 1)
-}
-
-stateless actor API { transfer = send_deposit }
-
-invariant "different accounts do not share state" {
-  Account.at(Alice).state == 0 || Account.at(Bob).state == 0
-}
-
-check Deposits {
-  semantics = "actors-v1"
-  domain Int = 0..2
-  inputs { once API.transfer(Alice) }
-  fairness { weak runtime.progress }
-}
-```
-
-The property is illustrative and intentionally weak; actual acceptance fixtures should assert concrete per-key outcomes and use a cover to avoid vacuity. `Account.at(id)` denotes a stable logical identity and `call` selects a typed handler and carries a serializable message, not an immediate nested Rust call. The version label `actors-v1` is now allocated to the branch's fault-free, finite request/reply slice with scheduler and replay tests; first-class keyed address values use `Address<ActorName>` and can cross a message boundary. The profile does not imply fault handling, durability, or a Cloudflare backend. Additional behavior requires new profile contracts and tests.
-
-A useful counterexample should show input acceptance, call issue, target identity, target acceptance, state commit, reply, resumed caller, and the violated predicate with bound IDs. A failed `fml check` is a behavior of the declared finite model and assumptions, **not** proof of a deployed bug.
+The initial profile rejects external I/O or suspension within a state-transition callback. Such operations need an explicit continuation/state-machine protocol or a separately specified adapter. This avoids claiming that a callback can hold a stale `state` argument across an `await` and still commit atomically. Multiple actors' ready messages may be scheduled in either order; within one actor identity, only one message turn executes at a time. There is no implicit synchronous `call` in this profile.
 
 ## Reference-level explanation
 
-### Architecture and boundaries
+### Language surface, typing and ownership
 
-Maintain three layers:
+- A stateful `actor A(id: Key)` defines `init(id: Key): State` and one `handle_message(state: State, message: Message): State` in the initial profile. The key and message domains must be finite; a singleton is an actor keyed by `unit` (whether its key is written explicitly is a surface decision). `init` is pure, deterministic and evaluated once per finite address at check initialization. General `init(args)` beyond identity may be added only when the check supplies typed finite arguments and their lifecycle is specified.
+- A stateless `actor A` defines `handle_message(message: Message): unit`; each accepted message runs with fresh locals. There is no retained state view. Additional handler methods/protocol variants are a future syntactic question: the initial message type can be an algebraic union and matched in one callback.
+- `state` is a **value parameter** for a callback, not a live state handle or a mutable global. A callback returns its next state. Ordinary pure `let` functions may compute portions of that transition. `send` is an explicit effect allowed only in callback statements (and helpers with conservatively inferred send effects); it returns `unit`. A pure helper or property may not send. Direct local recursion remains rejected in the first finite implementation.
+- `Address<A>` contains a typed actor name and finite key and may appear in records, variants, parameters and messages; it cannot grant access to `A`'s state. `send(address, message)` statically checks the actor's declared message protocol, including transitive data serializability. Owner capabilities from `actors-v1` cannot be serialized or smuggled through constructors, aliases, collections or helper returns. The new profile does not provide an owner capability to callbacks.
+- Local code evaluation cannot invoke the host network or Rust APIs. An unsupported effect or message form is a source error, not a request silently executed as a pure function. `init` cannot send. Every reachable callback branch returns one typed next state (or `unit` for stateless actors).
 
-1. **General modeling language:** algebraic data types, pure functions, effectful functions with explicit capabilities, stateless/stateful actor bindings, initial states, input slots, properties and scopes. This layer defines no Cloudflare product name.
-2. **Semantic profiles/adapters:** define available resource operations, typed capabilities, message/call failure modes, state persistence, consistency, queue delivery and scheduling rules. Product-specific tables (`d1`), `kv` and `bucket` may remain declarative syntax supplied by a Cloudflare-facing frontend or feature set; this RFD changes the **core actor syntax**, not the proposal for distinct storage semantics.
-3. **Native checker and diagnostics:** the existing typed IR, explicit-state graph, fairness and temporal engines, witnesses and replay. Preserve the checker contract from RFD0001; don't replace it with an unchecked interpreter.
+### Mailboxes, turns and atomicity
 
-The Rust modules remain a small single-package codebase. `src/syntax.rs` parses functions and actors; `src/functions.rs` binds functions and infers conservative transitive effects; `src/model.rs` typechecks/lowers; `src/semantics.rs` evaluates and schedules; `src/graph.rs`, `src/temporal.rs`, `src/checker.rs`, and `src/trace.rs` check and validate results. The future separation is a semantic boundary first, not a requirement to publish many crates.
+- Each finite actor address has an ordered pending mailbox. An external accepted input or a successful callback commit appends one message per `send`. Enqueue transitions from different actors may interleave nondeterministically; once appended, FIFO order is preserved **per target address**. The order of sends from one callback to the same address is source program order. No global ordering across distinct addresses is asserted.
+- A target may start only the head of its mailbox. In the initial profile, a complete callback (including local pure function calls and staged sends) is one atomic state transition: dequeue the head, compute and validate the next state and outbox, commit state, and append the outbox. Messages to self are appended after the active message is removed. A handler cannot process another message from its own address while its callback is running. Other addresses may proceed before or after this transition.
+- A direct external input acceptance only appends to the mailbox; it does not also run the callback. This preserves a checkable boundary between submission and processing. The initial profile excludes transport loss, duplication, timeout and crash; **absence of faults is an explicit reported assumption**, not exactly-once delivery from Cloudflare Queues or an end-to-end guarantee.
+- If processing or enqueuing would exceed a declared finite mailbox/message/turn bound or escape a finite data domain, return `INCONCLUSIVE` with the source operation and bound. Never drop the message, wrap a count, or treat a truncated graph as complete. Declare bounds in the check and trace; choose defaults only with measured fixtures. A bounded run may prove a property only for the bounded workload and state graph.
+- A reply is just another `send` with a typed reply address. It may be processed only after its sender's commit. Correlation IDs are part of the modeled protocol; mismatched, duplicate and stale replies require model logic or specific failure semantics. There is no auto-generated waiting caller or response slot in `actors-v2`.
 
-### Functions, types and capabilities
+### Scheduling, fairness, properties and replay
 
-- A function has named typed parameters, declared result type, lexically scoped `let`/`match` and a trailing result expression on each reachable branch. Non-unit functions with missing return paths are invalid. A function body does not imply an invocation, a message, a transaction or a suspension.
-- Local calls to *pure* functions evaluate deterministically inside the current local segment. Transitive effects must be included in checking: a helper that reads D1 or calls an actor does not become atomic merely because it has a function name. An effectful call is lowered to the same semantic boundaries it would have inline, with explicit caller continuation and call-site provenance.
-- Specification inspectors may read modeled state without invoking a resource operation. They are pure from the checker's perspective, but may not be used as a shortcut inside executable handlers. No accidental ambient access to another actor's state.
-- `Actor<State>` is an unforgeable, scoped owner capability supplied only to handlers of that actor. It may be passed to safe local helpers but may not be returned, stored in records/tables, sent as a message or captured across another actor boundary. This must hold transitively through aliases, variants, collections and function results; reject all unimplemented escaping forms. A separate typed `Address<ActorName>` may be stored or passed when its key domain is finite and serializable; the key type comes from the named actor's declaration. This experimental surface remains open to review.
-- A stateless actor binds functions of `(message: Input) -> Reply`; each invocation gets fresh locals. A stateful actor binds `(owner: Actor<State>, message: Input) -> Reply`; state is owned by the identified instance. Other actors do not receive its owner capability.
-- Only supported finite data types may cross a boundary; crossing cannot expose call stack frames, functions/closures or owner capabilities. The typechecker rejects unsupported calls rather than pretending arbitrary expressions serialize.
+- Nondeterministic choices include optional external inputs and enabled mailbox-head processing for each address. `weak runtime.progress` applies to an individual continuously enabled internal processing action. It does not force optional external submission. FIFO and atomic turns mean the head cannot be skipped by a later message; an empty mailbox does not give rise to a fairness obligation. A self-sending cycle remains a real infinite path, subject to finite bounds and fair scheduling; a permanently blocked turn must not be misreported as merely unfair.
+- Preserve invariants at initial and post-transition states, including the state after enqueue but before dequeue and after a sender commits but before a recipient runs. Check liveness over fair infinite paths with replayable lassos. External input slots require observations such as `submitted`/`processed`; internal messages require a separate, bounded, well-defined observation mechanism. The existing `requests(Actor.method)` view is **not** silently reinterpreted to include dynamic messages; define any temporal quantification over messages explicitly and test non-vacuity.
+- State hashing and serialized traces include keyed state, ordered mailbox contents, input-slot status, correlation-bearing messages, profile and limits, action labels and source/check identity. Retain distinct enabled edges even if they lead to equal data states. Replay re-executes each submission and callback commit, verifies ordering, state/outbox changes, source identity, loop closure and fairness. Trace layout changes require a format bump or explicit migration; old artifacts must not be silently accepted under new semantics.
 
-The spike has pure function calls, inferred effects, and now singleton/keyed `Actor<State>` owners in `actors-v1`, but does not yet enforce all of these rules in a proven general effect/capability system. Treat its implementation as evidence to refine, not proof that the intended discipline is sound.
+### Product boundaries and compatibility
 
-### Identity, state and scheduling
-
-- A stateless actor name identifies a service endpoint, **not** one retained process. Multiple accepted invocations have independent local frames and may overlap at allowed boundaries.
-- For keyed stateful actors, a name and a key select an instance: the same `(actor, key)` addresses the same modeled state; different keys never implicitly share an owner capability or state. Initialize each key from the actor's declared initial expression, either eagerly in a finite check or lazily with equivalent property-visible state. The active key domain must be finite and stated in the check. A singleton stateful actor is the special case with one unit key.
-- An invocation executes deterministic local operations until its next semantic boundary. A local `set` and following pure computation may belong to one transition if no intervening external effect exists. Calls and external operations split into issue and completion steps; the caller waits with a retained continuation while independently enabled invocations may run, including another invocation of the same stateful actor. **No entire-handler lock is inferred.** A read before suspension and a write after resumption can race.
-- An owned-state write commits at its local transition boundary. The generic `actors-v0` state is retained in model state but makes no persistence/restart guarantee. A durability adapter must say which commits survive restart, what happens to volatile locals and outstanding operations, and how its gating/transactions alter interleaving. Do not label the generic stateful actor as a Durable Object in checker output.
-- A typed actor call has (1) issue with caller continuation and target address, (2) target acceptance and execution, (3) reply publication, and (4) caller resume. A synchronous response is distinct from one-way delivery and Queue submission. The initial call profile should explicitly exclude transport failure and timeouts **and print that exclusion**; later profiles model known non-commit and uncertain outcome separately. Reply cannot be observed before the target's modeled commit. No implicit exactly-once semantics for queues or external side effects.
-- Direct local recursion remains rejected in a first finite implementation. A graph of actors calling one another may be cyclic; do not falsely reject all such topologies as recursive local functions. Instead track pending calls, finite IDs and capacity. If expansion can exceed representational capacity, report `INCONCLUSIVE` with the boundary, never silently drop an invocation. Define and test deadlock on mutual waiting, including how weak fairness treats truly disabled actions.
-
-### Properties, state space and results
-
-Preserve RFD0001's safety and temporal semantics: check invariants at initialization and **every reachable boundary**, including while a caller waits and after an actor commits but before its reply; check fair infinite paths for liveness; require a finite explicit domain for keys/messages and distinct input slots. `requests(Actor.handler)` is the read-only view of the check's finite external invocations; a distinct future view is needed for dynamically created actor-to-actor calls. Do not silently mingle or discard either category in quantifiers. A keyed property such as `Account.at(id).state` observes a **single instantaneous state** without calling the actor and must quantify over a declared finite key domain.
-
-State identity includes keyed actor values, active invocation and pending call identities, program counters, locals needed for future computation, and correlation between caller and callee. Trace and replay evidence include semantic-profile version, normalized source/check identity, enabled action labels, scope and fairness. Preserve distinct edges even when their data state is equal, and preserve history-sensitive temporal monitors. Capacity or depth/time cutoffs remain inconclusive; increasing a budget cannot transform an unexplored model into a verified one by dropping actions.
-
-### Product mappings and compatibility
-
-The product layer should make this distinction explicit:
-
-| Core concept | Possible Cloudflare mapping | Extra contract needed |
+| Generic model concept | Possible Cloudflare mapping | Separate contract required |
 | --- | --- | --- |
-| Stateless actor service | Worker request/event entrypoint | Trigger, response, binding scope, invocation lifetime, external-operation failures |
-| Keyed stateful actor | Durable Object per key | Identity routing, persistent vs volatile state, input/output gates, storage transactions, suspension/restart semantics |
-| One-way delivery | Queue producer/consumer | At-least-once delivery, retries, attempts, acknowledgments, duplication and limits |
-| Relational/object/key-value storage | D1 / R2 / KV | Separate typed operations and consistency profiles; not generic actor memory |
+| Stateless actor / message turn | Worker event entrypoint | Trigger type, invocation lifetime, response, bindings and failure behavior |
+| Keyed stateful actor | Durable Object by key | Routing, persistent versus volatile state, storage transactions, gates, suspension and restart |
+| Generic `send` / mailbox | **Not** automatically a Queue | Delivery attempts, duplicates, acknowledgment, retries, exhaustion and batch behavior |
+| Typed storage operations | D1 / KV / R2 | Distinct schemas, transactions, consistency and visibility |
 
-These are **adapters**, not synonyms. A deployment target, when one exists, must never assume a generic `stateful` actor is automatically durable or that generic calls are queues. Continue to reject unimplemented semantics at elaboration time.
+A generic mailbox is an in-memory modeling abstraction, not durable actor storage and not a Queue producer/consumer. Backend profiles must specify how a callback and outbox interact with external side effects and failures; if atomic state-and-send commit is not supported by a product, the adapter **must split that operation into truthful transitions** rather than inherit the generic rule. A model may be checked against its declared generic assumptions without implying production conformance.
 
-The existing `cf-core-v0` Worker/D1 sources remain regression fixtures via the transitional parser shim, while the new spike uses `actors-v0`. Do not change their declared meaning in place. The shim is provisional: prior to merging decide whether to (a) migrate examples with an automated diagnostic, (b) retain `worker` only in a Cloudflare frontend, or (c) support both under explicitly versioned profiles. New function/actor source cannot select `cf-core-v0`. The spike's trace format version changed from 1 to 2 to account for actor state/frames; old artifacts are refused. Further layout or semantic changes must likewise version/reject or explicitly migrate replay artifacts. Avoid publishing a successful check under a profile whose resource behavior the checker cannot implement.
+The current implementation has `actors-v0` functions/actors, `actors-v1` finite keyed actors and synchronous fault-free `call` with suspended callers, and a `cf-core-v0` Worker/D1 parser shim. All remain regression profiles; do not silently reinterpret `call` as `send` or `owner.set` as a returned next state. Introduce a distinct profile and examples for the asynchronous design only when the source-to-checker implementation exists. Decide separately whether to migrate legacy source, keep `worker` as a Cloudflare-only frontend, or retire it with diagnostics. Any trace state/layout change must version artifacts and reject or explicitly migrate previous formats (the spike currently emits format version 3).
 
 ### Security, privacy and observability
 
-Model source is untrusted and cannot invoke host Rust or network libraries. Guard nesting, expanded function cost, state size, call depth and artifact size; keep source-span diagnostics and deterministic replay. Never permit an `Actor<State>` capability to escape through a seemingly generic value. Traces may contain modeled user data and state: use synthetic data, escape control characters and retain no telemetry by default. Reports list omitted failures and durability assumptions, so a result cannot be mistaken for an implementation proof.
+Models cannot execute arbitrary host code or network operations. Enforce typed addresses, closed finite message data and non-escaping capabilities at every boundary. Guard parser nesting, elaboration, mailbox/message capacity, generated sends, graph size and artifact size. A trace can contain synthetic modeled user data, including reply addresses and messages; escape control characters in terminal output and do not collect telemetry by default. Reports prominently list fault, storage and delivery omissions.
 
-### Rollout and validation
+### Implementation and validation
 
-Continue work **on `spike/actor-generalization`** in end-to-end increments:
+1. Preserve the existing `cf-core-v0`, `actors-v0` and `actors-v1` tests and trace rejection rules. Add **new failing parser/profile-gating tests** for proposed `actor`, `init`, `handle_message` and `send` forms under older profiles before implementing the new one.
+2. Implement unified actor declarations, pure typed `init`, state-value callback parameters, full-branch next-state typing, and typed address/message protocols. Add stateless, singleton and keyed fixtures; reject calls to unavailable protocols and state/capability escape.
+3. Add the mailbox/outbox state and source-ordered staged `send` effects; expose input acceptance and atomic callback commit as separate actions. Test two senders to one target, two target keys, send-to-self, replies with correlation IDs, the impossibility of a reply processing before the sender commits, capacity `INCONCLUSIVE` and forbidden I/O/suspension inside the callback.
+4. Extend safety/temporal observations, fairness and replay for the new action families. Cross-check tiny graphs with an independent oracle and fuzz source/trace JSON. Include fair and unfair progress fixtures, a non-vacuous reply property and a replayable failed invariant. Validate colored/`NO_COLOR` CLI and ANSI-free JSON.
+5. Only after generic semantics pass, design separate Cloudflare Worker/DO and Queue adapters with product litmus tests. Do not label the generic profile as implementing either adapter. Resolve the old `worker` shim and migration plan before declaring the core stable.
 
-1. Keep the [existing suite](../../tests/) green and replay old Worker/D1 fixtures under `cf-core-v0`. Check both [`actor-stateless.fml`](../../examples/actor-stateless.fml) and [`actor-counter.fml`](../../examples/actor-counter.fml) via CLI; the latter intentionally fails and replays. Improve the `actors-v0` report so it does not imply Cloudflare storage semantics when no such resource appears.
-2. Test the core: pure helper substitution vs inline computation; effectful helper suspension at D1; rejected capability escape through every available type constructor/alias/list; tests for matching, scope, recursion, unsupported calls and vacuous claims. Preserve file/line/column for nested call actions.
-3. Add keyed address/instance semantics and property-only keyed inspection, a finite scope declaration, and same-key/different-key fixtures. Include a counterexample for a race across suspension within one actor. Do not infer durability.
-4. Add direct actor request/reply calls with pending correlated frames, independently scheduled target, fair-lasso coverage and replay. Exercise missing handler/wrong payload errors, self/cyclic calls, deadlock, scope overflow, orphaned calls (where relevant) and source-level trace causality. Version the new semantic profile and artifact if behavior changes.
-5. After the generic semantics pass, add *separate* Cloudflare adapters, starting with a Worker/DO contrast. Specify omissions and product litmus tests first. Queue delivery and D1 transaction behaviors follow RFD0001's distinct contracts rather than being folded into `actor`.
-
-Required checks at each step: `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, CLI `fml check` of passing/failing `.fml` fixtures, and `fml replay` of counterexamples. Expand fuzz targets and independently cross-check temporal behavior when adding new scheduler actions. A new syntax feature that parses but lacks typed execution/checking must fail explicitly until implemented. Before declaring the actor model stable, run both generic and Cloudflare-specific example suites with accurate profile labels, resource budgets and unsupported-feature diagnostics.
+Run `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, CLI checks of both passing and failing `.fml` fixtures, and replay after each end-to-end increment. Keep a new syntax feature rejected rather than accepted with unimplemented checking.
 
 ## Drawbacks
 
-- A generic actor core increases the surface to specify and validate; the attractive syntax may invite overconfidence in a simplistic mailbox model.
-- Separating product adapters risks another layer of versioning and trace compatibility work. The generic `Actor<State>` capability must not silently accumulate backend-specific guarantees.
-- Supporting keyed instances and actor-to-actor calls can explode the state space and needs robust capacity accounting and fairness/correlation tests.
-- Source that resembles normal functions can be mistaken for executable application code. The CLI and docs must keep saying *model*, not deploy.
-- A transitional legacy syntax shim burdens parser/typechecker maintenance until a migration decision is made.
-- Rejecting advanced higher-order or recursive functions limits expressiveness, but allowing unsupported control flow would invalidate verification.
+- Returning a new state instead of writing through a handle can make simple updates more verbose and makes a snapshot's meaning across future suspension particularly important. The initial profile therefore excludes suspension inside callbacks.
+- Atomic state-plus-outbox commit is convenient for a generic finite model but can be mistaken for a guarantee from a real transport. Every backend must either justify it or model weaker boundaries.
+- A FIFO mailbox with fault-free one-time processing is a narrow abstraction. Queue retries, distribution, actor restart and DO gating require other profiles; a generic name alone does not cover them.
+- Explicit reply addresses and correlation IDs add model code. They reveal ordering and duplicate-response bugs that implicit RPC can hide, but may warrant a separately specified convenience layer later.
+- Every finite address, message, queue position and possible send increases state space. Honest limits may make useful checks inconclusive.
+- Versioning and preserving the synchronous `actors-v1` slice increases maintenance cost during migration.
 
 ## Rationale and alternatives
 
 ### Proposed design
 
-A small language core describes typed computation and state ownership; product profiles describe resource and failure behavior. This reuses the native checker and permits systems unrelated to Cloudflare without disguising how Cloudflare primitives differ. The two runnable spike examples demonstrate that functions and actors compose with existing invariants, temporal claims and replay; the target contract closes the spike's gaps before claiming generality.
+One actor form keeps the public concept simple; `init` declares retained identity and state. State-in/state-out callbacks make ownership and commits explicit. One-way `send` gives asynchronous systems a composable primitive, while reply addresses and IDs express request/reply without baking a blocking RPC into the core. A precise generic mailbox is useful for modeling, but it is not a product adapter.
 
-### Simpler or narrower approach
+### Simpler local solution
 
-Keep `worker` as the only handler declaration and introduce only pure helper functions. This would improve reuse quickly but leave state identity and communication tied to product syntax. It remains an option if typed actor calls/ownership do not justify the complexity; the current spike gives us a way to measure that tradeoff.
+Keep `actors-v1`, rename `stateless actor`/`stateful actor` to `actor`, and retain `call` plus `owner.set`. This would reduce parser churn and preserve tested code but would keep synchronous waiting and state-capability mutation as the dominant mental model. It remains a supported experimental profile, not the proposed new core.
 
-### Other alternatives considered
+### Other alternatives
 
-- **Everything is a function, no actor declaration:** cannot determine which calls create independent invocations, own state, suspend, retry or expose an address. Those semantics would become magic conventions.
-- **Rename `worker` to `actor`, preserve singleton state:** minimal parser change but incorrect for keyed identity, message boundaries and interleaving. Do not claim a DO mapping from that rename.
-- **Universal mailbox backed by queues:** confuses direct request/reply with asynchronous at-least-once delivery and would hide retries and duplicates.
-- **A completely user-extensible semantic library now:** appealing for generality, but without a trusted, versioned semantic contract it could manufacture misleading guarantees. Keep extensions explicit and tested first.
+- **Implicit mutable `state` inside a handler:** concise, but a bare expression such as `state + 1` does not say whether it changes owned state. An explicit returned next state makes that unambiguous.
+- **Use `handle_call` with automatic reply tokens:** useful OTP precedent, but conflates the primitive actor mailbox with a synchronous protocol. Could be an explicitly versioned layer on top of messages, not a silent property of every actor.
+- **Expose `send` immediately while a callback runs:** allows a target to act on a reply before the sender's new state is installed. More faithful to some runtimes, but harder to reason about; represent it in an adapter that splits publication and commit if needed.
+- **No FIFO guarantee:** simpler scheduler and suitable for some transports, but too weak for a single-address receive loop. A separately versioned transport may weaken it.
+- **Universal Cloudflare mailbox:** incorrectly equates Worker events, DO storage and Queue delivery. Shared checker machinery does not justify collapsing their public contracts.
 
 ### Do nothing
 
-Continue RFD0001's product-first model. It checks useful Cloudflare systems, but non-Cloudflare modeling remains awkward and new backend behavior risks being encoded as more keywords instead of clear compositional semantics.
+Keep the synchronous spike as the core. It is useful for fault-free direct calls and keyed state, but makes independent replies and asynchronous cycles look like special cases rather than ordinary modeled behaviors.
 
-## Prior art
+## Prior art and related work
 
-- [RFD0001](RFD0001-initial-language-and-model-checker.md): keep its finite checking, fairness and evidence rules. This RFD proposes replacing its core `worker`/`durable` surface with functions and actors; it **does not** erase its differentiated Cloudflare resource semantics or pretend the first release is complete.
-- [Actor spike notes](../spikes/actor-generalization.md) and [`src/functions.rs`](../../src/functions.rs): provide concrete proof of a CLI vertical slice and reveal missing address, capability and effect guarantees. An executable spike is evidence, not a final specification.
-- [Riot](https://github.com/leostera/riot-lang): ML-shaped types and actor vocabulary are a useful syntactic precedent; process supervision (`link`/`monitor`) cannot be copied verbatim into a Cloudflare runtime model.
-- [TLA+](https://lamport.azurewebsites.net/tla/tla.html): system state, actions, fairness and temporal properties remain the semantic touchstones. A pleasant syntax does not replace explicit assumptions.
-- [Durable Object rules](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/): single-threaded objects can interleave across external awaits; persistent storage and output gates are extra product semantics, not generic actor features.
+- [RFD0001](RFD0001-initial-language-and-model-checker.md): retain the finite checker, fairness and differentiated Cloudflare resource contracts; revise only the generic actor vocabulary and messaging design.
+- [Actor spike notes](../spikes/actor-generalization.md): `actors-v1` has runnable keyed and synchronous call/replay fixtures. It is a valuable regression corpus, **not** evidence that asynchronous mailboxes are already implemented.
+- [Erlang/OTP `gen_server`](https://www.erlang.org/doc/apps/stdlib/gen_server.html): state-in/state-out callbacks and distinct call/cast/info handling motivate the design. This proposal resembles asynchronous `cast`/message handling more than `handle_call`: OTP synchronous calls carry a reply token, not merely an actor address. FML does not claim OTP supervision or scheduling equivalence.
+- [Riot](https://github.com/leostera/riot-lang): ML-shaped variants, functions and messaging inform the syntax; its process lifecycle is not automatically FML's semantic profile.
+- [TLA+](https://lamport.azurewebsites.net/tla/tla.html): explicit state, actions, fairness and infinite behaviors remain the checker contract.
+- [Durable Object rules](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/) and [Queues delivery guarantees](https://developers.cloudflare.com/queues/reference/delivery-guarantees/): real backend interleaving/persistence and at-least-once delivery must be specified separately, not inherited from the generic mailbox.
 
 ## Unresolved questions
 
 ### Before acceptance
 
-- Should keyed identity be mandatory for all stateful actors (`Unit` for a singleton), and should the surface be `Account.at(id)`, `Account[id]`, or another address form? Require a precise typed addressing rule, not just aesthetics.
-- Should `Actor<State>` be an explicit parameter, as in the spike, or implicitly scoped in actor-bound functions? How do we prevent capability escape in every supported data type?
-- What is the smallest useful `call` failure profile: no faults first, or an explicit timeout/unknown-outcome branch from the start? State the omission prominently either way.
-- Is the transitional `worker` syntax a compatibility frontend, a short-lived migration shim, or removed before an actor release? Existing `cf-core-v0` files and archived traces must not silently change meaning.
+- Confirm the chosen staged-send/atomic-commit abstraction for the generic profile and the FIFO-per-address rule. These are **proposed modeling assumptions**, not Cloudflare claims; choose different explicit profiles if a use case needs weaker guarantees.
+- Is `init(id)` enough for the first finite profile, or must `init(args)` accept check-supplied configuration? If so, define exactly which finite arguments each address receives and when they are evaluated.
+- Should stateless callbacks take only `(message)` and return `unit`, or should every actor have a uniform `unit` state parameter? This draft proposes the former.
+- Is one `handle_message` method over an algebraic message type sufficient initially? How should errors or rejected messages appear in the protocol rather than being silently swallowed?
+- Decide whether a syntactic singleton omits its `unit` key, whether `Address<ActorName>` remains the address type, and whether the old `worker` shim becomes a Cloudflare frontend, a migration tool, or is removed.
 
 ### During implementation
 
-- Define stable invocation/call/continuation IDs, actor-state canonicalization, weak fairness action IDs and capacity behavior for cycles and keyed instances.
-- Choose a lower-level IR for local calls and effectful suspension that retains source spans without interpreting recursive AST bodies indefinitely.
-- Separate capability/serialization checking from ordinary data type resolution and add focused fuzz/property tests; no untyped fallback.
-- Decide when to introduce a formal Cloudflare adapter registry vs keeping a versioned built-in D1 module.
+- Specify input and internal-message observation types, including temporal quantification over dynamically generated messages without checking only an initial snapshot.
+- Specify source-stable action IDs, mailbox/message canonicalization, bound accounting, replay format and fairness for identical messages and send-to-self cycles.
+- Audit transitive send effects, constructor/alias/collection non-escape, integer domains, early returns, match exhaustiveness and malformed artifacts. Add independent tiny-model oracles before calling the profile stable.
+- Decide where backend adapters are registered versus keeping D1 built in under `cf-core-v0`.
 
 ### Out of scope
 
-- Verified code generation or conformance testing against a production Worker/DO implementation.
-- Universal remote actor protocols, fault-tolerant messaging, restart recovery or durable state without a separate adapter/profile.
-- Arbitrary custom temporal operators, unbounded verification or recursive higher-order functions.
+- Production code generation or conformance proof, supervision/monitoring, alarms, arbitrary higher-order functions and unbounded model checking.
+- A Cloudflare Worker/DO/Queue equivalence claim, durable outbox, transport retry/uncertain delivery or synchronous RPC without a separately specified backend/profile.
 
 ## Future possibilities
 
-A composable library of **trusted semantic adapters** could model payments, replicated stores or other runtimes alongside Cloudflare; a verified generic actor core would make those additions approachable. Richer temporal composition, symmetry/partial-order reductions and graphical trace exploration are valuable later, but cannot justify weakening today's exact finite-check results or pretending that a well-typed model matches deployed code.
+A typed `request`/`reply` library could synthesize addresses and correlation IDs over `send` once its timeout, duplicate and failure semantics are explicit. Backend adapters could add DO persistence/gates, Queue retries or other systems without disguising their guarantees as the generic actor core. Richer temporal quantification, symmetry and partial-order reductions remain useful later, but none justify silently weakening today's exact finite-check results.

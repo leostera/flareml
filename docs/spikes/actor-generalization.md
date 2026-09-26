@@ -2,6 +2,10 @@
 
 Branch: `spike/actor-generalization`, based on the initial `main` checkpoint `327bd44`. This is a **spike**, not a finished replacement for [RFD0001](../rfds/RFD0001-initial-language-and-model-checker.md). No deployable runtime is produced.
 
+## Design direction after this checkpoint
+
+[RFD0002](../rfds/RFD0002-functions-and-actors.md) now proposes a **different** core: one `actor` declaration, typed `init(args) -> state`, state-in/state-out `handle_message`, and one-way typed `send` with explicit reply addresses and correlation IDs. The proposed mailbox, staged-send and atomic state/outbox commit rules are **not implemented** in this branch. Do not interpret the working `actors-v1` synchronous `call` as this protocol; it remains an experimental, versioned regression profile. A new profile and replay format are required if checker state or behavior changes.
+
 ## RFD0002 implementation checkpoint (experimental `actors-v1`)
 
 The sections below document the **original `actors-v0` checkpoint**; their "no calls/keyed instances" warnings are historical for that profile. The branch now has a second, opt-in `actors-v1` profile with typed `call(Actor.method, message)`, suspended callers, independently scheduled callee acceptance and reply, and finite keyed stateful actors addressed with `Actor.at(key)`. `Address<ActorName>` values can now be stored, sent, and used as `call(address.method, message)` without exposing the `Actor<State>` owner capability. Keyed input slots use `once Actor.at(key).method(message)`, and read-only specifications use `Actor.at(key).state`. Initial state is eagerly materialized for each finite key. `requests(Actor.method)` still observes only declared external slots. There are runnable passing and failing examples in `examples/actor-keyed.fml`, `examples/actor-address.fml`, `examples/actor-call.fml`, and `examples/actor-interleaving.fml`; the same-key interleaving example witnesses a lost update across an actor call. Replay artifacts are now version 3. `actors-v0` and `cf-core-v0` still run, and actor calls/keyed actors are gated to `actors-v1`.
