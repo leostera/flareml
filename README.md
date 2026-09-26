@@ -163,3 +163,5 @@ cargo +nightly fuzz run trace_json -- -max_total_time=120
 ```
 
 A separate optional scheduled/manual workflow runs these campaigns and saves artifacts. See the [acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) for completed work and remaining validation.
+
+The [proposed roadmap](docs/rfds/README.md#proposed-roadmap--not-implemented) sketches three sequential milestones: nondeterministic choice and faulty links, bounded dynamic spawning, then explicit suspension and reentrancy. These are designs for review, not currently supported syntax or engine behavior.

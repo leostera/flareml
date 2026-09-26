@@ -185,6 +185,8 @@ The generic core and unified property surface are implemented. Remaining **stabi
 
 The original proposal coupled generic-core acceptance to product adapters. That is no longer the merge boundary: no Worker/DO/Queue/D1 adapter is implemented or implied, and there is no profile registry. Resource models may later be explicit libraries/protocols, with truthful scheduling, storage, and failure rules. A model must split publication and state commit when its real system cannot justify atomicity.
 
-Next language design work, after stabilization: imports/namespaces, reusable actor definitions, finite static instances, and explicit initialization configuration. Those need a separate design, especially instance/address typing and imported-source replay identity. Do not add dynamic spawning, automatic RPC, suspension, or hidden compatibility modes as part of this stabilization pass.
+The proposed extension sequence is [RFD0003: choice and faulty links](RFD0003-nondeterministic-choice-and-faulty-links.md), [RFD0004: bounded spawn](RFD0004-bounded-spawn.md), then [RFD0005: suspension and reentrancy](RFD0005-suspension-and-reentrancy.md). These are not implemented and do not alter this current contract. Refine, implement, and validate each milestone separately; do not fold them into the core stabilization pass or introduce compatibility profiles.
+
+Constants, imports/namespaces, reusable definitions, and explicit initial population/configuration remain separate design work. Spawn must resolve definition/instance typing; imports must resolve replay source identity. No automatic RPC is implied.
 
 Out of scope: production code generation/conformance proofs, supervision, timers, crashes/restarts, automatic retry, shared-memory consistency models, unbounded checking, and backend equivalence claims. Partial-order/symmetry reductions are potential future engine work and require their own soundness validation.
