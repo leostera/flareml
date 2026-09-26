@@ -10,6 +10,9 @@ fuzz_target!(|data: &[u8]| {
         let programs = PROGRAMS.get_or_init(|| {
             [
                 include_str!("../../examples/counter-replies.fml"),
+                include_str!("../../examples/explicit-startup.fml"),
+                include_str!("../../examples/spawn-workers.fml"),
+                include_str!("../../examples/spawn-choice-workers.fml"),
                 include_str!("../../examples/faulty-link-loss.fml"),
                 include_str!("../../examples/faulty-link-duplicate-bug.fml"),
                 include_str!("../../examples/faulty-link-duplicate-fixed.fml"),

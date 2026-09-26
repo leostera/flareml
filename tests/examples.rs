@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 #[test]
 fn every_scenario_has_a_checked_verdict_and_replay() {
     let fixtures = [
+        ("explicit-startup.fml", Status::VerifiedInScope),
         ("counter-replies.fml", Status::VerifiedInScope),
         ("missing-reply.fml", Status::Violated),
         ("sequential-workflow.fml", Status::VerifiedInScope),
@@ -17,6 +18,8 @@ fn every_scenario_has_a_checked_verdict_and_replay() {
         ("inventory-reservation-fixed.fml", Status::VerifiedInScope),
         ("payment-idempotency-bug.fml", Status::Violated),
         ("payment-idempotency-fixed.fml", Status::VerifiedInScope),
+        ("spawn-workers.fml", Status::VerifiedInScope),
+        ("spawn-choice-workers.fml", Status::VerifiedInScope),
         ("faulty-link-loss.fml", Status::Violated),
         ("faulty-link-duplicate-bug.fml", Status::Violated),
         ("faulty-link-duplicate-fixed.fml", Status::VerifiedInScope),

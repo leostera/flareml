@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
 /// Only this artifact layout/meaning is supported; older traces must be regenerated.
-pub const FORMAT_VERSION: u32 = 7;
+pub const FORMAT_VERSION: u32 = 8;
 
 pub fn source_hash(source: &str) -> String {
     format!("{:x}", Sha256::digest(source.as_bytes()))
@@ -32,6 +32,7 @@ pub struct Trace {
     pub mailbox_bound: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_bound: Option<usize>,
+    pub spawn_bounds: std::collections::BTreeMap<String, usize>,
     pub states: Vec<State>,
     pub actions: Vec<Action>,
 }
@@ -65,6 +66,7 @@ impl Trace {
             weak_progress: p.check.fair,
             mailbox_bound: p.check.mailbox_bound,
             message_bound: p.check.message_bound,
+            spawn_bounds: p.check.spawn_bounds.clone(),
             states: trace_states,
             actions: chosen,
         }
@@ -79,6 +81,7 @@ impl Trace {
             || self.weak_progress != p.check.fair
             || self.mailbox_bound != p.check.mailbox_bound
             || self.message_bound != p.check.message_bound
+            || self.spawn_bounds != p.check.spawn_bounds
         {
             return Err(bad("model, check, bounds, or fairness mismatch"));
         }

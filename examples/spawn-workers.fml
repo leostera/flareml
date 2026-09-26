@@ -1,0 +1,97 @@
+// Setup creates only the coordinator. Each accepted job creates a fresh worker.
+type JobId = Alpha | Beta
+type CoordinatorMessage = Start(JobId, Actor<Coordinator>) | Done(JobId)
+type Work = Work { job: JobId, reply_to: Actor<Coordinator> }
+type CoordinatorState = CoordinatorState {
+  alpha: Option<Actor<Worker>>, beta: Option<Actor<Worker>>,
+  alpha_done: Bool, beta_done: Bool
+}
+let launch = (job: JobId, reply_to: Actor<Coordinator>): Actor<Worker> {
+  let worker = spawn(Worker);
+  send(worker, Work { job: job, reply_to: reply_to });
+  worker
+}
+actor Coordinator {
+  init(): CoordinatorState {
+    CoordinatorState { alpha: None, beta: None, alpha_done: false, beta_done: false }
+  }
+  handle_message(state: CoordinatorState, message: CoordinatorMessage): CoordinatorState {
+    match message {
+      | Start(job, reply_to) -> {
+          let worker = launch(job, reply_to);
+          match job {
+            | Alpha -> CoordinatorState { alpha: Some(worker), beta: state.beta, alpha_done: state.alpha_done, beta_done: state.beta_done }
+            | Beta -> CoordinatorState { alpha: state.alpha, beta: Some(worker), alpha_done: state.alpha_done, beta_done: state.beta_done }
+          }
+        }
+      | Done(job) -> {
+          match job {
+            | Alpha -> CoordinatorState { alpha: state.alpha, beta: state.beta, alpha_done: true, beta_done: state.beta_done }
+            | Beta -> CoordinatorState { alpha: state.alpha, beta: state.beta, alpha_done: state.alpha_done, beta_done: true }
+          }
+        }
+    }
+  }
+}
+actor Worker {
+  init(): Bool { false }
+  handle_message(state: Bool, work: Work): Bool {
+    send(work.reply_to, Done(work.job));
+    true
+  }
+}
+let distinct = (candidate: Option<CoordinatorState>): Bool {
+  match candidate {
+    | None -> true
+    | Some(state) -> (state.alpha != None && state.beta != None) implies state.alpha != state.beta
+  }
+}
+let completed = (candidate: Option<CoordinatorState>, request: CoordinatorMessage): Bool {
+  match candidate {
+    | None -> false
+    | Some(state) -> {
+        match request {
+          | Start(job, reply_to) -> {
+              match job { | Alpha -> state.alpha_done | Beta -> state.beta_done }
+            }
+          | Done(job) -> false
+        }
+      }
+  }
+}
+property "jobs get distinct workers" {
+  always (forall (c in instances(Coordinator)) { distinct(c.state) })
+}
+property "completion belongs to an accepted job" {
+  always (forall (i in inputs(Coordinator)) {
+    (exists (c in instances(Coordinator)) { c.reference == Some(i.target) && completed(c.state, i.payload) }) implies i.processed
+  })
+}
+property "both jobs can finish" {
+  reachable (forall (i in inputs(Coordinator)) {
+    exists (c in instances(Coordinator)) { c.reference == Some(i.target) && completed(c.state, i.payload) }
+  })
+}
+property "submitted jobs finish" {
+  forall (i in inputs(Coordinator)) {
+    i.submitted leads_to (exists (c in instances(Coordinator)) { c.reference == Some(i.target) && completed(c.state, i.payload) })
+  }
+}
+property "future workers finish" {
+  forall (worker in instances(Worker)) { worker.created leads_to worker.state == Some(true) }
+}
+property "unborn slots have no reference or state" {
+  always (forall (worker in instances(Worker)) {
+    worker.created == (worker.reference != None) && worker.created == (worker.state != None)
+  })
+}
+check TwoJobs {
+  spawn_bound Coordinator = 1
+  spawn_bound Worker = 2
+  mailbox_bound = 2
+  main {
+    let coordinator = spawn(Coordinator);
+    inputs { once send(coordinator, Start(Alpha, coordinator)) once send(coordinator, Start(Beta, coordinator)) }
+  }
+  fairness { weak runtime.progress }
+}

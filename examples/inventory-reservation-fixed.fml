@@ -1,20 +1,19 @@
 // Repair: reserve the last item atomically when making the offer.
 // Buyers commit only after an offer; reservation expiry is not modeled.
 // Two buyers, one item, no cancellations, failures, restocks, or retries.
-type BuyerId = Alice | Bob
 type Stock = Available | Reserved
 type Outcome = Waiting | Won | Lost
-type BuyerState = BuyerState { me: Actor<Buyer>, outcome: Outcome }
-type BuyerMessage = Start | Offer | Accepted | Rejected
+type BuyerState = BuyerState { inventory: Actor<Inventory>, outcome: Outcome }
+type BuyerMessage = Start(Actor<Buyer>) | Offer(Actor<Buyer>) | Accepted | Rejected
 type InventoryMessage = Probe(Actor<Buyer>) | Commit(Actor<Buyer>)
-actor Buyer(id: BuyerId) {
-  init(id: BuyerId): BuyerState { BuyerState { me: Buyer.at(id), outcome: Waiting } }
+actor Buyer {
+  init(inventory: Actor<Inventory>): BuyerState { BuyerState { inventory: inventory, outcome: Waiting } }
   handle_message(state: BuyerState, message: BuyerMessage): BuyerState {
     match message {
-      | Start -> { send(Inventory, Probe(state.me)); state }
-      | Offer -> { send(Inventory, Commit(state.me)); state }
-      | Accepted -> BuyerState { me: state.me, outcome: Won }
-      | Rejected -> BuyerState { me: state.me, outcome: Lost }
+      | Start(reply_to) -> { send(state.inventory, Probe(reply_to)); state }
+      | Offer(reply_to) -> { send(state.inventory, Commit(reply_to)); state }
+      | Accepted -> BuyerState { inventory: state.inventory, outcome: Won }
+      | Rejected -> BuyerState { inventory: state.inventory, outcome: Lost }
     }
   }
 }
@@ -24,7 +23,7 @@ actor Inventory {
     match message {
       | Probe(buyer) -> {
           match stock {
-            | Available -> { send(buyer, Offer); Reserved }
+            | Available -> { send(buyer, Offer(buyer)); Reserved }
             | Reserved -> { send(buyer, Rejected); Reserved }
           }
         }
@@ -32,20 +31,31 @@ actor Inventory {
     }
   }
 }
+let outcome = (candidate: Option<BuyerState>): Outcome {
+  match candidate { | None -> Waiting | Some(state) -> state.outcome }
+}
 property "one item cannot be promised to both buyers" {
-  always (!(Buyer.at(Alice).state.outcome == Won && Buyer.at(Bob).state.outcome == Won))
+  always (forall (first in instances(Buyer)) { forall (second in instances(Buyer)) {
+    first.reference != second.reference implies !(outcome(first.state) == Won && outcome(second.state) == Won)
+  } })
 }
 property "both buyers can finish" {
-  reachable (Buyer.at(Alice).state.outcome != Waiting && Buyer.at(Bob).state.outcome != Waiting)
+  reachable (forall (buyer in instances(Buyer)) { outcome(buyer.state) != Waiting })
 }
 property "submitted purchases finish" {
-  forall (id in BuyerId) {
-    (exists (i in inputs(Buyer)) { i.target == Buyer.at(id) && i.submitted })
-      leads_to Buyer.at(id).state.outcome != Waiting
+  forall (i in inputs(Buyer)) {
+    i.submitted leads_to (exists (buyer in instances(Buyer)) { buyer.reference == Some(i.target) && outcome(buyer.state) != Waiting })
   }
 }
 check LastItem {
+  spawn_bound Inventory = 1
+  spawn_bound Buyer = 2
   mailbox_bound = 2
-  inputs { once send(Buyer.at(Alice), Start) once send(Buyer.at(Bob), Start) }
+  main {
+    let inventory = spawn(Inventory);
+    let alice = spawn(Buyer, inventory);
+    let bob = spawn(Buyer, inventory);
+    inputs { once send(alice, Start(alice)) once send(bob, Start(bob)) }
+  }
   fairness { weak runtime.progress }
 }

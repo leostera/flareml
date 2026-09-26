@@ -15,7 +15,7 @@ struct Snapshot {
     queue: Vec<usize>,
 }
 fn snapshot(s: &State) -> Snapshot {
-    let Value::Variant(phase, _) = &s.actors["Machine"] else {
+    let Value::Variant(phase, _) = &s.spawned["Machine"][0] else {
         panic!("not a phase")
     };
     Snapshot {
@@ -88,7 +88,7 @@ actor Machine {{
   handle_message(state: Phase, message: Message): Phase {{ match state {{ {arms} }} }}
 }}
 property "well formed" {{ always true }}
-check C {{ mailbox_bound = 2 inputs {{ once send(Machine, M{}) once send(Machine, M{}) }} {} }}
+check C {{ spawn_bound Machine = 1 mailbox_bound = 2 main {{ let machine = spawn(Machine); inputs {{ once send(machine, M{}) once send(machine, M{}) }} }} {} }}
 "#,
                 payloads[0],
                 payloads[1],

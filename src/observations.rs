@@ -2,7 +2,7 @@
 //! temporal binding cannot accidentally refer to a later send with the same data.
 use crate::{
     model::Program,
-    semantics::{Env, Envelope, MessageObservation, State, Value},
+    semantics::{Envelope, MessageObservation, State, Value},
     syntax::{Error, Result, Span},
 };
 
@@ -68,24 +68,15 @@ impl Program {
         s: &State,
         span: Span,
     ) -> Result<Value> {
-        let input = self
-            .check
+        let input = s
             .inputs
             .get(i)
             .ok_or_else(|| Error::new(span, "internal: invalid input observation"))?;
         match field {
             "submitted" => Ok(Value::Bool(s.input_submitted[i])),
             "processed" => Ok(Value::Bool(s.input_processed[i])),
-            "payload" => self.eval(&input.value, &Env::new(), s),
-            "target" => {
-                let key = input
-                    .key
-                    .as_ref()
-                    .map(|e| self.eval(e, &Env::new(), s))
-                    .transpose()?
-                    .unwrap_or(Value::Unit);
-                Ok(Value::Address(input.actor.clone(), Box::new(key)))
-            }
+            "payload" => Ok(input.payload.clone()),
+            "target" => Ok(input.target.clone()),
             _ => Err(Error::new(span, "unknown input observation field")),
         }
     }

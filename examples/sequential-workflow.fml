@@ -1,26 +1,33 @@
-// One participant models a sequential algorithm. Each Step is an observable
-// algorithm step, not a thread or a deployment. Self-sends continue the work.
+// One participant models a sequential algorithm. Each message is an observable
+// step, not a thread or a deployment. Explicit self-references continue the work.
 type Phase = Idle | Prepared | Committed | Finished
-type Event = Start | Step
 actor Workflow {
   init(): Phase { Idle }
-  handle_message(state: Phase, event: Event): Phase {
+  handle_message(state: Phase, me: Actor<Workflow>): Phase {
     match state {
-      | Idle -> { send(Workflow, Step); Prepared }
-      | Prepared -> { send(Workflow, Step); Committed }
+      | Idle -> { send(me, me); Prepared }
+      | Prepared -> { send(me, me); Committed }
       | Committed -> Finished
       | Finished -> Finished
     }
   }
 }
 property "submitted work finishes" {
-  forall (i in inputs(Workflow)) { i.submitted leads_to Workflow.state == Finished }
+  forall (i in inputs(Workflow)) {
+    i.submitted leads_to (exists (w in instances(Workflow)) { w.reference == Some(i.target) && w.state == Some(Finished) })
+  }
 }
-property "preparation is observable" { reachable (Workflow.state == Prepared) }
-property "commit is observable" { reachable (Workflow.state == Committed) }
-property "finished stays finished" { always (Workflow.state == Finished implies always (Workflow.state == Finished)) }
+property "preparation is observable" { reachable (exists (w in instances(Workflow)) { w.state == Some(Prepared) }) }
+property "commit is observable" { reachable (exists (w in instances(Workflow)) { w.state == Some(Committed) }) }
+property "finished stays finished" {
+  forall (w in instances(Workflow)) { always (w.state == Some(Finished) implies always (w.state == Some(Finished))) }
+}
 check Sequential {
   mailbox_bound = 1
-  inputs { once send(Workflow, Start) }
+  spawn_bound Workflow = 1
+  main {
+    let workflow = spawn(Workflow);
+    inputs { once send(workflow, workflow) }
+  }
   fairness { weak runtime.progress }
 }

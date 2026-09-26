@@ -78,31 +78,6 @@ impl Expr {
         }
     }
 }
-/// Recognize a static actor path, optionally through a keyed address.
-pub fn actor_target(e: &Expr) -> Option<(String, Option<Expr>)> {
-    if let Some(path) = e.path() {
-        return Some((path, None));
-    }
-    let ExprKind::Field(address, method) = &e.kind else {
-        return None;
-    };
-    let ExprKind::Call(at, keys) = &address.kind else {
-        return None;
-    };
-    if keys.len() != 1 {
-        return None;
-    }
-    let ExprKind::Field(actor, name) = &at.kind else {
-        return None;
-    };
-    if name != "at" {
-        return None;
-    }
-    let ExprKind::Name(actor) = &actor.kind else {
-        return None;
-    };
-    Some((format!("{actor}.{method}"), Some(keys[0].clone())))
-}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Type {
     pub name: String,
@@ -139,6 +114,7 @@ pub enum StmtKind {
     Let(String, Expr),
     Expr(Expr),
     Match(Expr, Vec<(Pattern, Vec<Stmt>)>),
+    Inputs(Vec<Input>),
 }
 #[derive(Clone, Debug)]
 pub struct Stmt {
@@ -156,8 +132,6 @@ pub struct Function {
 #[derive(Clone, Debug)]
 pub struct Actor {
     pub name: String,
-    /// A finite, typed identity domain; absent for singleton actors.
-    pub key: Option<(String, Type)>,
     /// Owned state is retained between invocations; this does not imply durability.
     pub state: Option<Type>,
     pub handler: String,
@@ -179,20 +153,20 @@ pub struct Claim {
 }
 #[derive(Clone, Debug)]
 pub struct Input {
-    pub actor: String,
-    pub key: Option<Expr>,
+    pub target: Expr,
     pub value: Expr,
     pub span: Span,
 }
 #[derive(Clone, Debug)]
 pub struct Check {
     pub name: String,
-    pub inputs: Vec<Input>,
+    pub main: String,
     pub domains: BTreeMap<String, Vec<Expr>>,
     pub fair: bool,
     pub mailbox_bound: Option<usize>,
     /// Optional lifetime observation slots per actor declaration, never reused.
     pub message_bound: Option<usize>,
+    pub spawn_bounds: BTreeMap<String, usize>,
     pub span: Span,
 }
 #[derive(Clone, Debug, Default)]
@@ -263,6 +237,7 @@ struct Parser {
     tokens: Vec<Token>,
     i: usize,
     depth: usize,
+    setup: bool,
 }
 impl Parser {
     fn token(&self) -> &Token {
@@ -610,6 +585,26 @@ impl Parser {
             let n = self.name()?;
             self.expect("=")?;
             StmtKind::Let(n, self.expr(0)?)
+        } else if self.at("inputs") && self.setup {
+            self.take();
+            self.expect("{")?;
+            let mut inputs = Vec::new();
+            while !self.eat("}") {
+                self.expect("once")?;
+                let request = self.expr(0)?;
+                let ExprKind::Call(target, args) = &request.kind else {
+                    return self.err("input requires once send(address, message)");
+                };
+                if target.path().as_deref() != Some("send") || args.len() != 2 {
+                    return self.err("input requires once send(address, message)");
+                }
+                inputs.push(Input {
+                    target: args[0].clone(),
+                    value: args[1].clone(),
+                    span: request.span,
+                });
+            }
+            StmtKind::Inputs(inputs)
         } else if self.eat("match") {
             let e = self.expr(0)?;
             self.expect("{")?;
@@ -717,15 +712,6 @@ impl Parser {
                 });
             } else if self.eat("actor") {
                 let name = self.name()?;
-                let key = if self.eat("(") {
-                    let param = self.name()?;
-                    self.expect(":")?;
-                    let ty = self.ty()?;
-                    self.expect(")")?;
-                    Some((param, ty))
-                } else {
-                    None
-                };
                 self.expect("{")?;
                 let mut initializer = None;
                 let mut handler = None;
@@ -778,7 +764,6 @@ impl Parser {
                 });
                 m.actors.push(Actor {
                     name,
-                    key,
                     state,
                     handler,
                     initializer,
@@ -800,16 +785,38 @@ impl Parser {
                 let name = self.name()?;
                 self.expect("{")?;
                 let mut c = Check {
-                    name,
-                    inputs: vec![],
+                    name: name.clone(),
+                    main: format!("$check.{name}.main"),
                     domains: BTreeMap::new(),
                     fair: false,
                     mailbox_bound: None,
                     message_bound: None,
+                    spawn_bounds: BTreeMap::new(),
                     span,
                 };
                 let mut sections = std::collections::BTreeSet::new();
                 while !self.eat("}") {
+                    if self.eat("spawn_bound") {
+                        let actor = self.name()?;
+                        self.expect("=")?;
+                        let token = self.take();
+                        if token.string {
+                            return Err(Error::new(
+                                token.span,
+                                "spawn_bound requires an integer literal",
+                            ));
+                        }
+                        let bound = token.text.parse::<usize>().map_err(|_| {
+                            Error::new(token.span, "spawn_bound requires an integer in 0..4096")
+                        })?;
+                        if bound > 4096 {
+                            return Err(Error::new(token.span, "spawn_bound must be 0..4096"));
+                        }
+                        if c.spawn_bounds.insert(actor, bound).is_some() {
+                            return self.err("duplicate spawn_bound for actor");
+                        }
+                        continue;
+                    }
                     if self.eat("domain") {
                         let n = self.name()?;
                         self.expect("=")?;
@@ -845,55 +852,26 @@ impl Parser {
                         return self.err("duplicate check section");
                     }
                     match section.as_str() {
-                        "inputs" => {
-                            self.expect("{")?;
-                            while !self.eat("}") {
-                                self.expect("once")?;
-                                let span = self.token().span;
-                                let request = self.expr(0)?;
-                                let ExprKind::Call(target, mut args) = request.kind else {
-                                    return self.err("input requires once send(address, message)");
-                                };
-                                if target.path().as_deref() != Some("send") {
-                                    return self.err("input requires once send(address, message)");
-                                }
-                                let (actor, key, value) = {
-                                    if args.len() != 2 {
-                                        return self
-                                            .err("send input requires an address and one message");
-                                    }
-                                    let address = args.remove(0);
-                                    let (name, key) = match address.kind {
-                                        ExprKind::Name(name) => (name, None),
-                                        ExprKind::Call(at, mut keys) if keys.len() == 1 => {
-                                            let ExprKind::Field(actor, method) = at.kind else {
-                                                return self
-                                                    .err("send input requires Actor.at(key)");
-                                            };
-                                            let ExprKind::Name(name) = actor.kind else {
-                                                return self
-                                                    .err("send input requires Actor.at(key)");
-                                            };
-                                            if method != "at" {
-                                                return self
-                                                    .err("send input requires Actor.at(key)");
-                                            }
-                                            (name, Some(keys.remove(0)))
-                                        }
-                                        _ => {
-                                            return self
-                                                .err("send input requires a static actor address");
-                                        }
-                                    };
-                                    (name, key, args.remove(0))
-                                };
-                                c.inputs.push(Input {
-                                    actor,
-                                    key,
-                                    value,
+                        "main" => {
+                            self.setup = true;
+                            let mut body = self.block()?;
+                            self.setup = false;
+                            // Setup's result is ignored; statements still obey normal
+                            // Result-discard checking and lexical scope rules.
+                            body.push(Stmt {
+                                kind: StmtKind::Expr(Expr {
+                                    kind: ExprKind::Unit,
                                     span,
-                                });
-                            }
+                                }),
+                                span,
+                            });
+                            m.functions.push(Function {
+                                name: c.main.clone(),
+                                params: Vec::new(),
+                                output: Type::named("unit"),
+                                body,
+                                span,
+                            });
                         }
                         "mailbox_bound" | "message_bound" => {
                             self.expect("=")?;
@@ -930,6 +908,9 @@ impl Parser {
                         _ => return self.err(format!("unsupported check section `{section}`")),
                     }
                 }
+                if !sections.contains("main") {
+                    return self.err("check requires a main setup block (use main {} for an empty initial population)");
+                }
                 m.checks.push(c);
             } else {
                 return self.err(format!("unsupported declaration `{}`", self.token().text));
@@ -944,6 +925,7 @@ pub fn parse(source: &str) -> Result<Model> {
         tokens: lex(source)?,
         i: 0,
         depth: 0,
+        setup: false,
     }
     .model()
 }

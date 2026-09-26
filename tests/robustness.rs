@@ -22,7 +22,7 @@ fn nested_matches_and_expressions_hit_parser_guard() {
         body = format!("match msg {{ | _ -> {body} }}");
     }
     let source = format!(
-        "actor API {{ handle_message(msg: Bool): unit {{ {body} }} }} property \"ok\" {{ always true }} check C {{ mailbox_bound = 1 }}"
+        "actor API {{ handle_message(msg: Bool): unit {{ {body} }} }} property \"ok\" {{ always true }} check C {{ spawn_bound API = 0 mailbox_bound = 1 main {{}} }}"
     );
     assert!(
         compile(&source, None)
@@ -31,7 +31,7 @@ fn nested_matches_and_expressions_hit_parser_guard() {
             .contains("nesting")
     );
     let source = format!(
-        "property \"deep\" {{ always {}true{} }} check C {{ mailbox_bound = 1 }}",
+        "property \"deep\" {{ always {}true{} }} check C {{ mailbox_bound = 1 main {{}} }}",
         "(".repeat(150),
         ")".repeat(150)
     );
@@ -46,7 +46,7 @@ fn nested_matches_and_expressions_hit_parser_guard() {
 fn duplicate_check_and_property_names_are_rejected() {
     assert!(
         compile(
-            &format!("{FIXED}\ncheck OneIncrement {{ mailbox_bound = 1 }}"),
+            &format!("{FIXED}\ncheck OneIncrement {{ mailbox_bound = 1 main {{}} }}"),
             Some("OneIncrement")
         )
         .is_err()
@@ -70,7 +70,7 @@ fn model_types_cannot_be_cyclic_aliases() {
 }
 #[test]
 fn same_named_constructor_is_not_silently_an_empty_type_domain() {
-    let source = "type Tick = Tick property \"ticks\" { always (forall (t in Tick) { t == Tick }) } check C { mailbox_bound = 1 }";
+    let source = "type Tick = Tick property \"ticks\" { always (forall (t in Tick) { t == Tick }) } check C { mailbox_bound = 1 main {} }";
     let p = compile(source, None).unwrap();
     let report = flareml::checker::check(source, &p, &Default::default()).unwrap();
     assert_eq!(report.status, flareml::checker::Status::VerifiedInScope);
@@ -80,7 +80,7 @@ fn same_named_constructor_is_not_silently_an_empty_type_domain() {
 fn domains_cannot_recursively_execute_helpers_or_be_empty() {
     for domain in ["[]", "[id(0)]", "[0 + 1]"] {
         let source = format!(
-            "let id = (x: Int): Int {{ x }} property \"ok\" {{ always true }} check C {{ mailbox_bound = 1 domain Int = {domain} }}"
+            "let id = (x: Int): Int {{ x }} property \"ok\" {{ always true }} check C {{ mailbox_bound = 1 domain Int = {domain} main {{}} }}"
         );
         assert!(compile(&source, None).is_err());
     }

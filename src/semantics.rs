@@ -14,6 +14,9 @@ pub enum Value {
     List(Vec<Value>),
     Input(usize),
     Message(String, usize),
+    Instance(String, usize),
+    /// Unforgeable source-level key for dynamically allocated addresses.
+    Identity(usize),
     Address(String, Box<Value>),
 }
 impl Value {
@@ -57,8 +60,9 @@ impl std::fmt::Display for Value {
             Self::List(xs) => write!(f, "[{}]", joined(xs)),
             Self::Input(i) => write!(f, "input #{i}"),
             Self::Message(actor, i) => write!(f, "{actor} message #{i}"),
-            Self::Address(name, key) if **key == Value::Unit => write!(f, "{name}"),
-            Self::Address(name, key) => write!(f, "{name}.at({key})"),
+            Self::Instance(actor, i) => write!(f, "{actor} instance #{i}"),
+            Self::Identity(i) => write!(f, "instance #{i}"),
+            Self::Address(name, key) => write!(f, "{name}[{key}]"),
         }
     }
 }
@@ -83,45 +87,22 @@ pub struct MessageObservation {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
-    pub actors: BTreeMap<String, Value>,
-    #[serde(with = "keyed_actor_serde")]
-    pub keyed_actors: BTreeMap<String, BTreeMap<Value, Value>>,
+    pub inputs: Vec<ExternalInput>,
     #[serde(with = "mailbox_serde")]
     pub mailboxes: BTreeMap<Value, Vec<Envelope>>,
     pub input_submitted: Vec<bool>,
     pub input_processed: Vec<bool>,
     pub messages: BTreeMap<String, Vec<MessageObservation>>,
+    /// Monotone allocation registry. Vector length is the next fresh identity;
+    /// stateless instances store unit. Slots are never removed or reused.
+    pub spawned: BTreeMap<String, Vec<Value>>,
 }
-mod keyed_actor_serde {
-    use super::Value;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
-    use std::collections::BTreeMap;
-    pub fn serialize<S: Serializer>(
-        values: &BTreeMap<String, BTreeMap<Value, Value>>,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        values
-            .iter()
-            .map(|(name, instances)| (name, instances.iter().collect::<Vec<_>>()))
-            .collect::<BTreeMap<_, _>>()
-            .serialize(serializer)
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<BTreeMap<String, BTreeMap<Value, Value>>, D::Error> {
-        let values = BTreeMap::<String, Vec<(Value, Value)>>::deserialize(deserializer)?;
-        values
-            .into_iter()
-            .map(|(name, entries)| {
-                let count = entries.len();
-                let instances: BTreeMap<_, _> = entries.into_iter().collect();
-                if instances.len() != count {
-                    return Err(D::Error::custom("duplicate keyed actor identity"));
-                }
-                Ok((name, instances))
-            })
-            .collect()
-    }
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalInput {
+    pub target: Value,
+    pub payload: Value,
+    pub source: Span,
 }
 mod mailbox_serde {
     use super::{Envelope, Value};
@@ -153,6 +134,7 @@ pub struct Action {
     pub span: Span,
     pub fair: bool,
     pub choices: Vec<crate::choices::Choice>,
+    pub spawns: Vec<crate::spawning::Spawn>,
 }
 #[derive(Clone, Debug)]
 pub struct Step {
@@ -162,7 +144,7 @@ pub struct Step {
 
 impl Program {
     pub fn initial(&self) -> Result<State> {
-        self.initial_messages()
+        self.initial_messages(None)
     }
     pub fn successors(&self, s: &State) -> Result<Vec<Step>> {
         self.message_successors(s, None, None)
@@ -281,16 +263,10 @@ impl Program {
             ));
         }
         if t.name == "Actor" {
-            let actor = &self.actors[&t.args[0].name];
-            let keys = if let Some((_, key)) = &actor.key {
-                self.type_domain(key, depth + 1)?
-            } else {
-                vec![Value::Unit]
-            };
-            return Ok(keys
-                .into_iter()
-                .map(|key| Value::Address(actor.name.clone(), Box::new(key)))
-                .collect());
+            return Err(Error::new(
+                Span::default(),
+                "cannot enumerate actor references; use instances(Actor)",
+            ));
         }
         if t.name == "Option" {
             let mut v = vec![Value::none()];
@@ -329,33 +305,6 @@ impl Program {
     pub fn eval(&self, e: &Expr, env: &Env, s: &State) -> Result<Value> {
         let _guard = crate::evaluation::EvaluationGuard::enter(e.span)?;
         use ExprKind::*;
-        if let Field(_, field) = &e.kind
-            && field == "state"
-            && let Some((path, Some(key))) = actor_target(e)
-            && let Some(name) = path.strip_suffix(".state")
-            && self.actors.contains_key(name)
-        {
-            let key = self.eval(&key, env, s)?;
-            return s
-                .keyed_actors
-                .get(name)
-                .and_then(|instances| instances.get(&key))
-                .cloned()
-                .ok_or_else(|| {
-                    Error::new(e.span, "LIMIT: actor key outside finite identity domain")
-                });
-        }
-        if let Some(actor) = e
-            .path()
-            .and_then(|path| path.strip_suffix(".state").map(str::to_owned))
-            && self.actors.contains_key(&actor)
-        {
-            return s
-                .actors
-                .get(&actor)
-                .cloned()
-                .ok_or_else(|| Error::new(e.span, "actor has no initialized state"));
-        }
         let ev = |x: &Expr| self.eval(x, env, s);
         match &e.kind {
             Bool(b) => Ok(Value::Bool(*b)),
@@ -365,9 +314,6 @@ impl Program {
             Name(n) => {
                 if let Some(v) = env.get(n) {
                     return Ok(v.clone());
-                }
-                if self.actors.get(n).is_some_and(|a| a.key.is_none()) {
-                    return Ok(Value::Address(n.clone(), Box::new(Value::Unit)));
                 }
                 if n == "None" {
                     return Ok(Value::none());
@@ -391,26 +337,16 @@ impl Program {
                     .ok_or_else(|| Error::new(e.span, "missing record field")),
                 Value::Input(i) => self.input_field(i, n, s, e.span),
                 Value::Message(actor, i) => self.message_field(&actor, i, n, s, e.span),
+                Value::Instance(actor, i) => self.instance_field(&actor, i, n, s, e.span),
                 _ => Err(Error::new(e.span, "cannot inspect field")),
             },
             Call(f, args) => {
                 let path = f.path().unwrap_or_default();
-                if let Field(actor, method) = &f.kind
-                    && method == "at"
-                    && let Name(name) = &actor.kind
-                    && self.actors.get(name).is_some_and(|a| a.key.is_some())
-                {
-                    let address = Value::Address(name.clone(), Box::new(ev(&args[0])?));
-                    if !s.mailboxes.contains_key(&address) {
-                        return Err(Error::new(
-                            e.span,
-                            "LIMIT: actor key outside finite identity domain",
-                        ));
-                    }
-                    return Ok(address);
-                }
                 if let Some(function) = self.functions.get(&path) {
-                    if self.effects[&path].sends || self.effects[&path].chooses {
+                    if self.effects[&path].sends
+                        || self.effects[&path].chooses
+                        || self.effects[&path].spawns
+                    {
                         return Err(Error::new(
                             e.span,
                             "internal: effectful helper reached pure evaluation",
@@ -428,14 +364,21 @@ impl Program {
                         .collect();
                     return self.eval_body(&function.body, &mut locals, s, None);
                 }
+                if path == "instances" {
+                    let actor = args[0].path().expect("typed instance view");
+                    return Ok(Value::List(
+                        (0..self.check.spawn_bounds[&actor])
+                            .map(|i| Value::Instance(actor.clone(), i))
+                            .collect(),
+                    ));
+                }
                 if path == "inputs" || path == "messages" {
                     let actor = args[0].path().unwrap_or_default();
                     return Ok(Value::List(if path == "inputs" {
-                        self.check
-                            .inputs
+                        s.inputs
                             .iter()
                             .enumerate()
-                            .filter(|(_, input)| input.actor == actor)
+                            .filter(|(_, input)| matches!(&input.target, Value::Address(name, _) if name == &actor))
                             .map(|(i, _)| Value::Input(i))
                             .collect()
                     } else {
@@ -544,6 +487,24 @@ impl Program {
                 turn.poll()?;
             }
             result = match &statement.kind {
+                StmtKind::Inputs(inputs) => {
+                    let turn = turn.as_deref_mut().ok_or_else(|| {
+                        Error::new(statement.span, "internal: inputs outside setup")
+                    })?;
+                    for input in inputs {
+                        turn.poll()?;
+                        let target = self.eval(&input.target, env, s)?;
+                        let payload = self.eval(&input.value, env, s)?;
+                        self.check_value(&target, input.span)?;
+                        self.check_value(&payload, input.span)?;
+                        turn.inputs.push(ExternalInput {
+                            target,
+                            payload,
+                            source: input.span,
+                        });
+                    }
+                    Value::Unit
+                }
                 StmtKind::Let(name, expr) => {
                     let value = self.eval_statement(expr, env, s, turn.as_deref_mut())?;
                     self.check_value(&value, expr.span)?;
@@ -587,6 +548,14 @@ impl Program {
             && let ExprKind::Call(target, args) = &expr.kind
         {
             let path = target.path().unwrap_or_default();
+            if path == "spawn" {
+                let actor = args[0].path().expect("typed spawn definition");
+                let values = args[1..]
+                    .iter()
+                    .map(|arg| self.eval(arg, env, s))
+                    .collect::<Result<Vec<_>>>()?;
+                return turn.spawn(self, &actor, values, expr.span, s);
+            }
             if path == "choose" {
                 let [
                     Expr {
@@ -603,7 +572,9 @@ impl Program {
                 let address = self.eval(&args[0], env, s)?;
                 let message = self.eval(&args[1], env, s)?;
                 self.check_value(&message, expr.span)?;
-                if !s.mailboxes.contains_key(&address) {
+                if !s.mailboxes.contains_key(&address)
+                    && !turn.spawns.iter().any(|spawn| spawn.address == address)
+                {
                     return Err(Error::new(
                         expr.span,
                         "LIMIT: send target outside finite identity domain",
@@ -613,7 +584,9 @@ impl Program {
                 return Ok(Value::Unit);
             }
             if let Some(f) = self.functions.get(&path)
-                && (self.effects[&path].sends || self.effects[&path].chooses)
+                && (self.effects[&path].sends
+                    || self.effects[&path].chooses
+                    || self.effects[&path].spawns)
             {
                 let values = args
                     .iter()

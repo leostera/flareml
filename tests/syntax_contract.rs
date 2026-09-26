@@ -5,7 +5,7 @@ use flareml::{
     syntax::{self, ExprKind},
 };
 fn model(property: &str) -> String {
-    format!("property \"p\" {{ {property} }} check C {{ mailbox_bound = 1 }}")
+    format!("property \"p\" {{ {property} }} check C {{ mailbox_bound = 1 main {{}} }}")
 }
 #[test]
 fn prefix_temporal_operators_require_parentheses_for_compound_predicates() {
@@ -80,12 +80,12 @@ fn duplicate_sections_and_out_of_range_bounds_are_rejected() {
         "mailbox_bound = 1 message_bound = 0",
         "mailbox_bound = 1 message_bound = 4097",
         "mailbox_bound = 1 domain Int = [0] domain Int = [1]",
-        "mailbox_bound = 1 inputs {} inputs {}",
+        "mailbox_bound = 1 main {}", // duplicate main appended below
         "mailbox_bound = 1 init {}",
     ] {
         assert!(
             compile(
-                &format!("property \"p\" {{ always true }} check C {{ {config} }}"),
+                &format!("property \"p\" {{ always true }} check C {{ {config} main {{}} }}"),
                 None
             )
             .is_err(),
@@ -103,12 +103,12 @@ fn actor_methods_and_arity_are_closed() {
         "actor A { handle_message(x: Bool): unit { () } handle_message(y: Bool): unit { () } }",
         "actor A { init(): Bool { false } init(): Bool { true } handle_message(s: Bool, x: Bool): Bool { x } }",
     ] {
-        assert!(compile(&format!("{actor} {}", model("always true")), None).is_err());
+        assert!(compile(&format!("{actor} property \"p\" {{ always true }} check C {{ spawn_bound A = 1 mailbox_bound = 1 main {{ spawn(A) }} }}"), None).is_err());
     }
 }
 #[test]
 fn singleton_type_and_constructor_share_a_name_without_losing_domain_identity() {
-    let source = "type Tick = Tick property \"tick is present\" { reachable (exists (t in Tick) { t == Tick }) } property \"each tick\" { forall (t in Tick) { eventually (t == Tick) } } check C { mailbox_bound = 1 }";
+    let source = "type Tick = Tick property \"tick is present\" { reachable (exists (t in Tick) { t == Tick }) } property \"each tick\" { forall (t in Tick) { eventually (t == Tick) } } check C { mailbox_bound = 1 main {} }";
     let p = compile(source, None).unwrap();
     let r = checker::check(source, &p, &Options::default()).unwrap();
     assert_eq!(r.claims[0].result, "REACHED");

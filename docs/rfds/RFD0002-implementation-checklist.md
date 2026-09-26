@@ -6,9 +6,9 @@ Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 
 ### One language, one engine
 
-- [x] One actor form, pure singleton/keyed initialization, state-in/state-out handlers and one-way typed sends.
+- [x] One actor definition form, explicit deterministic `check.main` populations, pure typed initializer arguments, state-in/state-out handlers and one-way typed sends.
 - [x] No `semantics` selector, legacy parser/profile dispatch, Worker/D1 primitives, owner capabilities, synchronous calls, continuation frames, or old trace readers.
-- [x] Shared local statement evaluator for pure functions and message turns; only turns receive an outbox.
+- [x] Shared local statement evaluator for pure functions, setup, and message turns; only setup/turn execution receives an outbox.
 - [x] Stable Rust toolchain and normal CI; clap-derived CLI.
 - [x] Required semicolons for bindings and intermediate statements; unterminated tail values, terminated-tail `unit`, explicit match-arm separators, and no whitespace-only sequencing. Manually migrated examples/fixtures; regressions cover parenthesized tails after sends and Result-discard rejection.
 - [x] Current-only examples for sequential computation, eligibility policy, replies, missing replies, routed accounts, lost updates, and their atomic repair.
@@ -46,6 +46,7 @@ Contract: [RFD0002](RFD0002-functions-and-actors.md). Development is on `main`.
 - [x] Default source/configuration/report/all-witness bundles; snapshot replay, corruption rejection, safe filenames, incomplete/invalid reports, I/O failure and concurrent allocation tests.
 - [x] Inventory reservation and payment idempotency bug/repair pairs, including non-vacuous completion queries.
 - [x] RFD0003 choice extension: independent candidate-product checks, branch-local outbox/observation isolation, constrained transcript replay, fairness/cutoff regressions, and loss/duplication examples checked per obligation.
+- [x] RFD0004 bounded spawn: independent two-coordinator allocation machine, stable future-instance temporal checks, allocation/choice rollback, distinct pools, address-capacity guards, and format-8 replay/tamper tests. Setup has an independent population/FIFO oracle, local captured inputs, shared lifetime bounds, deadline/capacity cutoffs without partial initial states, and initial-snapshot corruption checks. See the RFD for current measurements and validation.
 
 ## Remaining validation before calling the core stable
 
@@ -60,9 +61,9 @@ A later local nightly installation succeeded for [RFD0003](RFD0003-nondeterminis
 
 ## Deferred scope, not generic-core blockers
 
-- [ ] Imports/namespaces, reusable definitions, explicit finite static instances and check-supplied initialization: separate design, including replay source identity.
+- [ ] Imports/namespaces and generic reusable definitions: separate design, including replay source identity. Explicit initial instances and check-supplied initialization are implemented by `main` and `spawn`.
 - [ ] Resource/transport libraries or adapters: specify real consistency, scheduling, storage and failure behavior. No Worker/DO/Queue/D1 equivalence is claimed, and no profile switch is planned.
-- [ ] Crashes/restarts, retries/timeouts, dynamic spawn, suspended callbacks, RPC conveniences and shared-memory models: not part of the present execution contract.
+- [ ] Crashes/restarts, retries/timeouts, suspended callbacks, RPC conveniences and shared-memory models: not part of the present execution contract.
 - [ ] Symmetry/partial-order/symbolic reductions: only after soundness design and differential validation.
 
 ## Reproduce

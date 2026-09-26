@@ -177,25 +177,25 @@ fn validate_walk(g: &Graph, kind: Kind, p: &[bool], q: &[bool], w: &flareml::gra
         visited.pop();
     }
     let formula = match kind {
-        Kind::Always => "always P.state",
-        Kind::Eventually => "eventually P.state",
-        Kind::Response => "P.state leads_to Q.state",
-        Kind::Until => "P.state until Q.state",
-        Kind::Recurrence => "always eventually P.state",
-        Kind::Stabilization => "eventually always P.state",
-        Kind::Persistence => "always (P.state implies always Q.state)",
+        Kind::Always => "always p_view()",
+        Kind::Eventually => "eventually p_view()",
+        Kind::Response => "p_view() leads_to q_view()",
+        Kind::Until => "p_view() until q_view()",
+        Kind::Recurrence => "always eventually p_view()",
+        Kind::Stabilization => "eventually always p_view()",
+        Kind::Persistence => "always (p_view() implies always q_view())",
     };
     let source = format!(
-        "actor P {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ s }} }} actor Q {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ s }} }} property \"p\" {{ {formula} }} check C {{ mailbox_bound = 1 }}"
+        "actor P {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ s }} }} actor Q {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ s }} }} let p_view = (): Bool {{ forall (x in instances(P)) {{ x.state == Some(true) }} }} let q_view = (): Bool {{ forall (x in instances(Q)) {{ x.state == Some(true) }} }} property \"p\" {{ {formula} }} check C {{ spawn_bound P = 1 spawn_bound Q = 1 mailbox_bound = 1 main {{ spawn(P); spawn(Q) }} }}"
     );
     let expression = syntax::parse(&source).unwrap().claims[0].body.clone();
     let program = flareml::compile(&source, None).unwrap();
     let states: Vec<_> = visited
         .iter()
         .map(|&v| State {
-            actors: BTreeMap::from([
-                ("P".into(), Value::Bool(p[v])),
-                ("Q".into(), Value::Bool(q[v])),
+            spawned: BTreeMap::from([
+                ("P".into(), vec![Value::Bool(p[v])]),
+                ("Q".into(), vec![Value::Bool(q[v])]),
             ]),
             ..State::default()
         })

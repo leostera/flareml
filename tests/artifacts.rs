@@ -31,7 +31,7 @@ fn replay(run: &Path, witness: &Path) -> Output {
 fn saves_every_witness_with_safe_filenames_and_replays_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.fml");
-    let text = "property \"../../escaped\" { reachable true } property \"second\" { reachable true } property \"safe\" { always true } check C { mailbox_bound = 1 }";
+    let text = "property \"../../escaped\" { reachable true } property \"second\" { reachable true } property \"safe\" { always true } check C { mailbox_bound = 1 main {} }";
     fs::write(&source, text).unwrap();
     let root = dir.path().join("runs");
     let out = check(&source, &root, &[]);

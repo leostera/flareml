@@ -1,98 +1,63 @@
-//! One execution contract: finite FIFO mailboxes and atomic state/outbox turns.
+//! One execution contract: explicit deterministic setup, FIFO mailboxes, atomic turns.
 use crate::{
+    choices::Turn,
     model::Program,
     semantics::{Action, Env, State, Step, Value},
     syntax::{Error, Result, Span},
 };
-
 impl Program {
-    pub(crate) fn initial_messages(&self) -> Result<State> {
-        let mut s = State::default();
-        for actor in self.actors.values() {
-            let keys = if let Some((_, ty)) = &actor.key {
-                let mut keys = self.domain(&ty.name, 0)?;
-                keys.sort();
-                keys.dedup();
-                if keys.is_empty() || keys.len() > 4096 {
-                    return Err(Error::new(
-                        actor.span,
-                        "LIMIT: actor identity domain is empty or exceeds 4096",
-                    ));
-                }
-                keys
-            } else {
-                vec![Value::Unit]
-            };
-            for key in keys {
-                self.check_value(&key, actor.span)?;
-                s.mailboxes
-                    .insert(Value::Address(actor.name.clone(), Box::new(key)), vec![]);
-                if s.mailboxes.len() > 4096 {
-                    return Err(Error::new(
-                        actor.span,
-                        "LIMIT: total actor address capacity (4096)",
-                    ));
-                }
-            }
-        }
-        // All addresses exist before any pure initializer, independent of source order.
-        for actor in self.actors.values() {
-            if let Some(init) = &actor.initializer {
-                let f = &self.functions[init];
-                let keys: Vec<_> = s
-                    .mailboxes
-                    .keys()
-                    .filter_map(|address| match address {
-                        Value::Address(name, key) if name == &actor.name => {
-                            Some(key.as_ref().clone())
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                for key in keys {
-                    let mut env = Env::new();
-                    if actor.key.is_some() {
-                        env.insert(f.params[0].0.clone(), key.clone());
-                    }
-                    let state = self.eval_body(&f.body, &mut env, &s, None)?;
-                    self.check_value(&state, f.span)?;
-                    if actor.key.is_some() {
-                        s.keyed_actors
-                            .entry(actor.name.clone())
-                            .or_default()
-                            .insert(key, state);
-                    } else {
-                        s.actors.insert(actor.name.clone(), state);
-                    }
-                }
-            }
-        }
-        for input in &self.check.inputs {
-            let key = input
-                .key
-                .as_ref()
-                .map(|k| self.eval(k, &Env::new(), &s))
-                .transpose()?
-                .unwrap_or(Value::Unit);
-            let actor = input.actor.clone();
-            if !s
-                .mailboxes
-                .contains_key(&Value::Address(actor, Box::new(key)))
-            {
+    pub(crate) fn initial_messages(&self, budget: Option<&crate::graph::Budget>) -> Result<State> {
+        let empty = State::default();
+        let main = &self.functions[&self.check.main];
+        let mut outcomes =
+            self.turn_outcomes(&main.body, &Env::new(), &empty, budget, Some(&[]))?;
+        let (_, turn) = outcomes.pop().expect("deterministic setup");
+        let mut state = empty;
+        self.publish(&mut state, &turn)?;
+        for input in &turn.inputs {
+            turn.poll()?;
+            if !state.mailboxes.contains_key(&input.target) {
                 return Err(Error::new(
-                    input.span,
-                    "LIMIT: input target outside finite identity domain",
+                    input.source,
+                    "input target must be created by main",
                 ));
             }
-            self.check_value(&self.eval(&input.value, &Env::new(), &s)?, input.span)?;
-            s.input_submitted.push(false);
-            s.input_processed.push(false);
         }
-        Ok(s)
+        state.input_submitted = vec![false; turn.inputs.len()];
+        state.input_processed = vec![false; turn.inputs.len()];
+        state.inputs = turn.inputs;
+        Ok(state)
+    }
+    /// Called only on a private state clone; failure never publishes a partial turn.
+    fn publish(&self, next: &mut State, turn: &Turn<'_>) -> Result<()> {
+        for allocation in &turn.spawns {
+            turn.poll()?;
+            let Value::Address(name, key) = &allocation.address else {
+                return Err(Error::new(
+                    allocation.span,
+                    "internal: invalid allocation address",
+                ));
+            };
+            let slots = next.spawned.entry(name.clone()).or_default();
+            if key.as_ref() != &Value::Identity(slots.len())
+                || next.mailboxes.contains_key(&allocation.address)
+            {
+                return Err(Error::new(
+                    allocation.span,
+                    "internal: allocation is not fresh",
+                ));
+            }
+            slots.push(allocation.initial.clone());
+            next.mailboxes
+                .insert(allocation.address.clone(), Vec::new());
+        }
+        for (target, payload, source) in &turn.outbox {
+            turn.poll()?;
+            self.enqueue_message(next, target.clone(), payload.clone(), None, *source)?;
+        }
+        Ok(())
     }
     pub(crate) fn fair_enabled(&self, s: &State) -> std::collections::BTreeSet<String> {
-        // Every nonempty FIFO has a processing action; choices do not change its
-        // fairness identity. Closed-graph checking rules out incomplete turns.
         s.mailboxes
             .iter()
             .filter(|(_, queue)| self.check.fair && !queue.is_empty())
@@ -112,66 +77,68 @@ impl Program {
                 span: Span::default(),
                 fair: false,
                 choices: Vec::new(),
+                spawns: Vec::new(),
             },
             state: s.clone(),
         }];
-        for (i, input) in self.check.inputs.iter().enumerate() {
-            if s.input_submitted[i]
-                || replay.is_some_and(|action| action.id != format!("submit:{i}"))
-            {
+        for (i, input) in s.inputs.iter().enumerate() {
+            if let Some(budget) = budget {
+                budget.poll()?;
+            }
+            if s.input_submitted[i] || replay.is_some_and(|a| a.id != format!("submit:{i}")) {
                 continue;
             }
-            let key = input
-                .key
-                .as_ref()
-                .map(|k| self.eval(k, &Env::new(), s))
-                .transpose()?
-                .unwrap_or(Value::Unit);
-            let address = Value::Address(input.actor.clone(), Box::new(key));
-            let message = self.eval(&input.value, &Env::new(), s)?;
             let mut next = s.clone();
             self.enqueue_message(
                 &mut next,
-                address.clone(),
-                message.clone(),
+                input.target.clone(),
+                input.payload.clone(),
                 Some(i),
-                input.span,
+                input.source,
             )?;
             next.input_submitted[i] = true;
             steps.push(Step {
                 action: Action {
                     id: format!("submit:{i}"),
-                    description: format!("submit {message} to {address} from input #{i}"),
-                    span: input.span,
+                    description: format!(
+                        "submit {} to {} from input #{i}",
+                        input.payload, input.target
+                    ),
+                    span: input.source,
                     fair: false,
                     choices: Vec::new(),
+                    spawns: Vec::new(),
                 },
                 state: next,
             });
         }
         for (address, queue) in &s.mailboxes {
-            if replay.is_some_and(|action| action.id != processing_id(address)) {
+            if let Some(budget) = budget {
+                budget.poll()?;
+            }
+            if replay.is_some_and(|a| a.id != processing_id(address)) {
                 continue;
             }
             let Some(envelope) = queue.first() else {
                 continue;
             };
-            let message = &envelope.payload;
             let Value::Address(actor_name, key) = address else {
-                return Err(Error::new(Span::default(), "internal: invalid mailbox key"));
+                return Err(Error::new(
+                    Span::default(),
+                    "internal: invalid mailbox address",
+                ));
+            };
+            let Value::Identity(index) = key.as_ref() else {
+                return Err(Error::new(Span::default(), "internal: invalid identity"));
             };
             let actor = &self.actors[actor_name];
             let function = &self.functions[&actor.handler];
-            let mut args = vec![];
+            let mut args = Vec::new();
             if actor.state.is_some() {
-                args.push(if actor.key.is_some() {
-                    s.keyed_actors[actor_name][key.as_ref()].clone()
-                } else {
-                    s.actors[actor_name].clone()
-                });
+                args.push(s.spawned[actor_name][*index].clone());
             }
-            args.push(message.clone());
-            let env: Env = function
+            args.push(envelope.payload.clone());
+            let env = function
                 .params
                 .iter()
                 .zip(args)
@@ -182,25 +149,24 @@ impl Program {
                 &env,
                 s,
                 budget,
-                replay.map(|action| action.choices.as_slice()),
+                replay.map(|a| a.choices.as_slice()),
             )? {
                 turn.poll()?;
+                if !turn.inputs.is_empty() {
+                    return Err(Error::new(
+                        function.span,
+                        "internal: input registration outside main",
+                    ));
+                }
                 self.check_value(&next_state, function.span)?;
-                // Work on a clone: a cutoff never partly mutates the source state.
                 let mut next = s.clone();
                 next.mailboxes
                     .get_mut(address)
                     .expect("known mailbox")
                     .remove(0);
                 if actor.state.is_some() {
-                    if actor.key.is_some() {
-                        next.keyed_actors
-                            .get_mut(actor_name)
-                            .expect("initialized actor")
-                            .insert(*key.clone(), next_state.clone());
-                    } else {
-                        next.actors.insert(actor_name.clone(), next_state.clone());
-                    }
+                    next.spawned.get_mut(actor_name).expect("allocated actor")[*index] =
+                        next_state.clone();
                 }
                 if let Some(i) = envelope.input {
                     next.input_processed[i] = true;
@@ -208,26 +174,19 @@ impl Program {
                 if let Some(i) = envelope.observation {
                     next.messages.get_mut(actor_name).expect("observed actor")[i].processed = true;
                 }
-                let count = turn.outbox.len();
-                let mut sends = vec![];
-                for (target, value, source) in turn.outbox {
-                    sends.push(format!("{value} -> {target} at byte {}", source.start));
-                    self.enqueue_message(&mut next, target, value, None, source)?;
-                }
-                let description = format!(
-                    "process {message} at {address}; commit {next_state}; enqueue {count} message(s) [{}]",
-                    sends.join(", ")
-                );
-                steps.push(Step {
-                    action: Action {
-                        id: processing_id(address),
-                        description,
-                        span: function.span,
-                        fair: self.check.fair,
-                        choices: turn.choices,
-                    },
-                    state: next,
-                });
+                self.publish(&mut next, &turn)?;
+                let sends: Vec<_> = turn
+                    .outbox
+                    .iter()
+                    .map(|(target, value, span)| {
+                        format!("{value} -> {target} at byte {}", span.start)
+                    })
+                    .collect();
+                steps.push(Step { action: Action {
+                    id: processing_id(address),
+                    description: format!("process {} at {address}; commit {next_state}; enqueue {} message(s) [{}]", envelope.payload, sends.len(), sends.join(", ")),
+                    span: function.span, fair: self.check.fair, choices: turn.choices, spawns: turn.spawns,
+                }, state: next });
             }
         }
         Ok(steps)

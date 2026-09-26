@@ -5,12 +5,13 @@ fn combinatorial_state_predicates_have_a_work_limit_and_release_it() {
     for i in 0..22 {
         predicate = format!("forall (x{i} in Bool) {{ {predicate} }}");
     }
-    let source =
-        format!("property \"bounded\" {{ always ({predicate}) }} check C {{ mailbox_bound = 1 }}");
+    let source = format!(
+        "property \"bounded\" {{ always ({predicate}) }} check C {{ mailbox_bound = 1 main {{}} }}"
+    );
     let p = compile(&source, None).unwrap();
     let error = checker::check(&source, &p, &Default::default()).unwrap_err();
     assert!(error.message.contains("LIMIT: local evaluation"), "{error}");
-    let good = "property \"ok\" { always true } check C { mailbox_bound = 1 }";
+    let good = "property \"ok\" { always true } check C { mailbox_bound = 1 main {} }";
     let r = checker::check(good, &compile(good, None).unwrap(), &Default::default()).unwrap();
     assert_eq!(r.status, checker::Status::VerifiedInScope);
 }
@@ -21,7 +22,7 @@ fn temporal_expansion_is_bounded_even_when_inner_quantifiers_are_empty() {
         formula = format!("forall (x{i} in Bool) {{ {formula} }}");
     }
     let source = format!(
-        "actor A {{ handle_message(msg: unit): unit {{ () }} }} property \"bounded\" {{ {formula} }} check C {{ mailbox_bound = 1 }}"
+        "actor A {{ handle_message(msg: unit): unit {{ () }} }} property \"bounded\" {{ {formula} }} check C {{ spawn_bound A = 0 mailbox_bound = 1 main {{}} }}"
     );
     let p = compile(&source, None).unwrap();
     let error = checker::check(&source, &p, &Default::default()).unwrap_err();
@@ -32,7 +33,7 @@ fn temporal_expansion_is_bounded_even_when_inner_quantifiers_are_empty() {
 }
 #[test]
 fn negative_integer_pool_literals_are_supported_without_unchecked_arithmetic() {
-    let source = "actor A { init(): Int { -1 } handle_message(state: Int, message: unit): Int { state } } property \"negative\" { always (A.state == -1) } check C { mailbox_bound = 1 domain Int = [-1, 0, 1] }";
+    let source = "actor A { init(): Int { -1 } handle_message(state: Int, message: unit): Int { state } } property \"negative\" { always (forall (a in instances(A)) { a.state == Some(-1) }) } check C { spawn_bound A = 1 mailbox_bound = 1 domain Int = [-1, 0, 1] main { spawn(A) } }";
     let p = compile(source, None).unwrap();
     let r = checker::check(source, &p, &Default::default()).unwrap();
     assert_eq!(r.status, checker::Status::VerifiedInScope);

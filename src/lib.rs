@@ -10,6 +10,7 @@ mod messaging;
 pub mod model;
 mod observations;
 pub mod semantics;
+pub mod spawning;
 pub mod syntax;
 pub mod temporal;
 pub mod trace;

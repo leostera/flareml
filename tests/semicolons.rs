@@ -8,7 +8,7 @@ use flareml::{
 fn model(ty: &str, body: &str) -> String {
     format!(
         "actor A {{ init(): {ty} {{ {body} }} handle_message(s: {ty}, m: unit): {ty} {{ s }} }}
-         property \"safe\" {{ always true }} check C {{ mailbox_bound = 1 }}"
+         property \"safe\" {{ always true }} check C {{ spawn_bound A = 1 mailbox_bound = 1 main {{ spawn(A) }} }}"
     )
 }
 
@@ -49,7 +49,7 @@ fn only_unterminated_tails_return_a_value() {
         ),
     ] {
         let program = compile(&model("Bool", body), None).unwrap();
-        assert_eq!(program.initial().unwrap().actors["A"], expected);
+        assert_eq!(program.initial().unwrap().spawned["A"][0], expected);
     }
     for body in [
         "",
@@ -60,7 +60,7 @@ fn only_unterminated_tails_return_a_value() {
     ] {
         let program = compile(&model("unit", body), None).unwrap();
         assert_eq!(
-            program.initial().unwrap().actors["A"],
+            program.initial().unwrap().spawned["A"][0],
             Value::Unit,
             "{body}"
         );
@@ -102,7 +102,10 @@ fn match_arms_use_bars_and_braced_statement_sequences() {
         "match Some(true) { | Some(x) -> { let y = x; false; y } | None -> false }",
     );
     let program = compile(&source, None).unwrap();
-    assert_eq!(program.initial().unwrap().actors["A"], Value::Bool(true));
+    assert_eq!(
+        program.initial().unwrap().spawned["A"][0],
+        Value::Bool(true)
+    );
     for body in [
         "match Some(true) { | Some(x) -> x; | None -> false }",
         "match Some(true) { | Some(x) -> x None -> false }",
@@ -124,7 +127,10 @@ fn non_tail_match_requires_a_semicolon_and_discards_branch_values() {
         None,
     )
     .unwrap();
-    assert_eq!(program.initial().unwrap().actors["A"], Value::Bool(false));
+    assert_eq!(
+        program.initial().unwrap().spawned["A"][0],
+        Value::Bool(false)
+    );
 }
 
 #[test]
@@ -132,16 +138,16 @@ fn send_then_parenthesized_value_is_not_a_call_on_send_result() {
     let source = r#"
 actor A {
   init(): Bool { false }
-  handle_message(s: Bool, m: unit): Bool {
+  handle_message(s: Bool, b: Actor<B>): Bool {
     let next = !s;
-    send(B, ()); // The following parentheses start the block's value.
+    send(b, ()); // The following parentheses start the block's value.
     (next)
   }
 }
 actor B { handle_message(m: unit): unit { (); } }
-property "turn commits" { reachable A.state }
+property "turn commits" { reachable (exists (a in instances(A)) { a.state == Some(true) }) }
 property "delivery progresses" { forall (i in inputs(A)) { i.submitted leads_to i.processed } }
-check C { mailbox_bound = 1 inputs { once send(A, ()) } fairness { weak runtime.progress } }
+check C { spawn_bound A = 1 spawn_bound B = 1 mailbox_bound = 1 main { let a = spawn(A); let b = spawn(B); inputs { once send(a, b) } } fairness { weak runtime.progress } }
 "#;
     let program = compile(source, None).unwrap();
     let report = checker::check(source, &program, &Options::default()).unwrap();
@@ -152,5 +158,5 @@ check C { mailbox_bound = 1 inputs { once send(A, ()) } fairness { weak runtime.
         .unwrap()
         .validate(source, &program)
         .unwrap();
-    assert!(compile(&source.replace("send(B, ());", "send(B, ())"), None).is_err());
+    assert!(compile(&source.replace("send(b, ());", "send(b, ())"), None).is_err());
 }

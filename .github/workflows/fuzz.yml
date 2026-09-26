@@ -30,6 +30,9 @@ jobs:
           mkdir -p fuzz/corpus/source fuzz/corpus/trace_json
           cp examples/*.fml fuzz/corpus/source/
           cargo run --locked -- check examples/counter-replies.fml --trace-out fuzz/corpus/trace_json/replies.json
+          cargo run --locked -- check examples/explicit-startup.fml --trace-out fuzz/corpus/trace_json/startup.json
+          cargo run --locked -- check examples/spawn-workers.fml --trace-out fuzz/corpus/trace_json/spawn-workers.json
+          cargo run --locked -- check examples/spawn-choice-workers.fml --trace-out fuzz/corpus/trace_json/spawn-choice-workers.json
           cargo run --locked -- check examples/faulty-link-duplicate-fixed.fml --property "a duplicate can finish" --trace-out fuzz/corpus/trace_json/duplicate-fixed.json
           for model in faulty-link-loss faulty-link-duplicate-bug; do
             code=0

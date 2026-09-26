@@ -3,11 +3,20 @@ use flareml::{
     compile,
 };
 fn model(extra: &str) -> String {
-    format!("{extra} property \"ok\" {{ always true }} check C {{ mailbox_bound = 1 }}")
+    let bounds = if extra.contains("actor API") {
+        "spawn_bound API = 0"
+    } else if extra.contains("actor A ") {
+        "spawn_bound A = 0"
+    } else {
+        ""
+    };
+    format!(
+        "{extra} property \"ok\" {{ always true }} check C {{ {bounds} mailbox_bound = 1 main {{}} }}"
+    )
 }
 #[test]
 fn empty_payload_types_are_unified_across_collection_elements() {
-    let invalid = "property \"typed\" { always (forall (x in [None, Some(true), Some(1)]) { true }) } check C { mailbox_bound = 1 }";
+    let invalid = "property \"typed\" { always (forall (x in [None, Some(true), Some(1)]) { true }) } check C { mailbox_bound = 1 main {} }";
     assert!(
         compile(invalid, None)
             .unwrap_err()
@@ -48,8 +57,8 @@ type Outcome = Outcome(Result<Bool, Bool>)
 let unwrap = (result: Result<Bool, Bool>): Bool { match result { | Ok(x) -> x | Err(_) -> false } }
 actor API { init(): Bool { false } handle_message(state: Bool, msg: Result<Bool, Bool>): Bool { unwrap(msg) } }
 property "outcomes are finite" { always (forall (r in Outcome) { r == r }) }
-property "success" { reachable API.state }
-check C { mailbox_bound = 1 inputs { once send(API, Ok(true)) } }
+property "success" { reachable (exists (api in instances(API)) { api.state == Some(true) }) }
+check C { spawn_bound API = 1 mailbox_bound = 1 main { let api = spawn(API); inputs { once send(api, Ok(true)) } } }
 "#;
     let p = compile(source, None).unwrap();
     let r = checker::check(source, &p, &Options::default()).unwrap();
@@ -85,13 +94,16 @@ actor Counter {
   init(): Int { 0 }
   handle_message(state: Int, message: unit): Int { state + 1 }
 }
+let small = (candidate: Option<Int>): Bool {
+  match candidate { | None -> true | Some(value) -> value <= 1 }
+}
 let bounded = (): Bool {
-  let current = Counter.state;
-  let small = current <= 1;
-  small
+  let current = instances(Counter);
+  let valid = forall (counter in current) { small(counter.state) };
+  valid
 }
 property "safe" { always bounded() }
-check C { mailbox_bound = 1 domain Int = 0..1 inputs { once send(Counter, ()) } }
+check C { spawn_bound Counter = 1 mailbox_bound = 1 domain Int = 0..1 main { let counter = spawn(Counter); inputs { once send(counter, ()) } } }
 "#;
     let p = compile(source, None).unwrap();
     assert_eq!(
@@ -127,5 +139,5 @@ fn globals_and_locals_cannot_be_shadowed() {
     ] {
         assert!(compile(&model(extra), None).is_err());
     }
-    assert!(compile("actor A { handle_message(msg: Bool): unit { () } } property \"p\" { always (forall (A in Bool) { A }) } check C { mailbox_bound = 1 }", None).is_err());
+    assert!(compile("actor A { handle_message(msg: Bool): unit { () } } property \"p\" { always (forall (A in Bool) { A }) } check C { spawn_bound A = 0 mailbox_bound = 1 main {} }", None).is_err());
 }

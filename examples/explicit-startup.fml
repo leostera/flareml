@@ -1,0 +1,26 @@
+// main creates and starts this participant explicitly. Unlike an optional
+// input slot, its startup message is already queued in the initial state.
+type Startup = Start
+actor MainActor {
+  init(): Bool { false }
+  handle_message(state: Bool, message: Startup): Bool { true }
+}
+property "startup is queued" {
+  always (forall (m in messages(MainActor)) { m.sent && !m.external })
+}
+property "startup completes" {
+  forall (m in messages(MainActor)) { m.sent leads_to m.processed }
+}
+property "completion is reachable" {
+  reachable (exists (participant in instances(MainActor)) { participant.state == Some(true) })
+}
+check ExplicitStartup {
+  spawn_bound MainActor = 1
+  mailbox_bound = 1
+  message_bound = 1
+  main {
+    let main = spawn(MainActor);
+    send(main, Start);
+  }
+  fairness { weak runtime.progress }
+}

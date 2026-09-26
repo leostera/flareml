@@ -57,7 +57,7 @@ fn invalid_source_is_structured_and_source_mapped() {
     let file = dir.path().join("invalid.fml");
     fs::write(
         &file,
-        "property \"broken\" {\n always missing_name\n}\ncheck C { mailbox_bound = 1 }",
+        "property \"broken\" {\n always missing_name\n}\ncheck C { mailbox_bound = 1 main {} }",
     )
     .unwrap();
     let out = fml(&["check", file.to_str().unwrap(), "--format", "json"]);
@@ -107,7 +107,7 @@ fn finite_and_lasso_artifacts_are_saved_and_replayed() {
 #[test]
 fn current_trace_format_only_and_no_semantics_switch() {
     let dir = tempfile::tempdir().unwrap();
-    let trace = dir.path().join("keyed.json");
+    let trace = dir.path().join("instances.json");
     let out = fml(&[
         "check",
         "examples/lost-update.fml",
@@ -120,10 +120,11 @@ fn current_trace_format_only_and_no_semantics_switch() {
     let artifact: serde_json::Value = serde_json::from_slice(&fs::read(&trace).unwrap()).unwrap();
     assert_eq!(artifact["format_version"], flareml::trace::FORMAT_VERSION);
     assert!(artifact.get("semantics").is_none());
-    assert!(artifact["states"][0]["keyed_actors"]["Client"].is_array());
+    assert!(artifact["states"][0]["spawned"]["Client"].is_array());
+    assert!(artifact["states"][0].get("keyed_actors").is_none());
     assert!(artifact["states"][0].get("frames").is_none());
     assert!(artifact["states"][0].get("tables").is_none());
-    for version in [0, 1, 2, 3, 4, 5, 6, 999] {
+    for version in [0, 1, 2, 3, 4, 5, 6, 7, 999] {
         let mut old = artifact.clone();
         old["format_version"] = version.into();
         fs::write(&trace, serde_json::to_vec(&old).unwrap()).unwrap();
@@ -185,7 +186,7 @@ fn async_fair_and_unfair_progress_replays_through_cli() {
 fn reachability_and_property_selection_have_explicit_exit_policy() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("properties.fml");
-    fs::write(&source, "property \"safe\" { always false } property \"possible\" { reachable false } check C { mailbox_bound = 1 }").unwrap();
+    fs::write(&source, "property \"safe\" { always false } property \"possible\" { reachable false } check C { mailbox_bound = 1 main {} }").unwrap();
     let out = fml(&[
         "check",
         source.to_str().unwrap(),

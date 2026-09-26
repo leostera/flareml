@@ -4,18 +4,23 @@ use flareml::{
     semantics::Value,
 };
 const SOURCE: &str = r#"
-type Message = Start | First | Second
+type Message = Start(Actor<Target>) | First | Second
 actor Sender {
   init(): Bool { false }
   handle_message(state: Bool, message: Message): Bool {
-    send(Target, First);
-    send(Target, Second);
-    true
+    match message {
+      | Start(target) -> {
+          send(target, First);
+          send(target, Second);
+          true
+        }
+      | _ -> state
+    }
   }
 }
 actor Target { handle_message(message: Message): unit { () } }
-property "commit" { reachable Sender.state }
-check C { mailbox_bound = 1 inputs { once send(Sender, Start) } }
+property "commit" { reachable (exists (sender in instances(Sender)) { sender.state == Some(true) }) }
+check C { spawn_bound Sender = 1 spawn_bound Target = 1 mailbox_bound = 1 main { let sender = spawn(Sender); let target = spawn(Target); inputs { once send(sender, Start(target)) } } }
 "#;
 #[test]
 fn overflowing_second_send_does_not_partly_commit_the_turn() {
@@ -39,10 +44,11 @@ fn overflowing_second_send_does_not_partly_commit_the_turn() {
                 .starts_with("LIMIT:")
         );
         assert_eq!(submitted, before);
-        assert_eq!(submitted.actors["Sender"], Value::Bool(false));
+        assert_eq!(submitted.spawned["Sender"][0], Value::Bool(false));
         assert!(!submitted.input_processed[0]);
         assert!(
-            submitted.mailboxes[&Value::Address("Target".into(), Box::new(Value::Unit))].is_empty()
+            submitted.mailboxes[&Value::Address("Target".into(), Box::new(Value::Identity(0)))]
+                .is_empty()
         );
         assert!(!submitted.messages.contains_key("Target"));
         let report = checker::check(&source, &p, &Options::default()).unwrap();
@@ -57,7 +63,7 @@ fn successful_commit_publishes_all_sends_in_order_and_completes_input() {
     let r = checker::check(&source, &p, &Options::default()).unwrap();
     let trace = r.witness().unwrap();
     let s = trace.states.last().unwrap();
-    assert_eq!(s.actors["Sender"], Value::Bool(true));
+    assert_eq!(s.spawned["Sender"][0], Value::Bool(true));
     assert!(s.input_processed[0]);
     assert_eq!(
         s.messages["Target"]
@@ -75,18 +81,18 @@ fn successful_commit_publishes_all_sends_in_order_and_completes_input() {
 #[test]
 fn self_send_observes_committed_next_state_not_old_snapshot() {
     let source = r#"
-type Message = Start | Finish
+type Message = Start(Actor<A>) | Finish
 actor A {
   init(): Int { 0 }
   handle_message(state: Int, msg: Message): Int {
     match msg {
-      | Start -> { send(A, Finish); state + 1 }
+      | Start(me) -> { send(me, Finish); state + 1 }
       | Finish -> state + 1
     }
   }
 }
-property "completed" { reachable (A.state == 2) }
-check C { domain Int = 0..2 mailbox_bound = 1 inputs { once send(A, Start) } fairness { weak runtime.progress } }
+property "completed" { reachable (exists (a in instances(A)) { a.state == Some(2) }) }
+check C { domain Int = 0..2 spawn_bound A = 1 mailbox_bound = 1 main { let a = spawn(A); inputs { once send(a, Start(a)) } } fairness { weak runtime.progress } }
 "#;
     let p = compile(source, None).unwrap();
     let r = checker::check(source, &p, &Options::default()).unwrap();
@@ -96,8 +102,8 @@ check C { domain Int = 0..2 mailbox_bound = 1 inputs { once send(A, Start) } fai
 }
 #[test]
 fn nested_send_helpers_preserve_source_order_and_branch_scoping() {
-    let source = SOURCE.replace("actor Sender {", "let last = (): unit { send(Target, Second) }\nlet notify = (): unit { send(Target, First); last() }\nactor Sender {")
-        .replace("send(Target, First);\n    send(Target, Second);", "notify();")
+    let source = SOURCE.replace("actor Sender {", "let last = (target: Actor<Target>): unit { send(target, Second) }\nlet notify = (target: Actor<Target>): unit { send(target, First); last(target) }\nactor Sender {")
+        .replace("send(target, First);\n          send(target, Second);", "notify(target);")
         .replace("mailbox_bound = 1", "mailbox_bound = 2 message_bound = 2");
     let p = compile(&source, None).unwrap();
     let r = checker::check(&source, &p, &Options::default()).unwrap();

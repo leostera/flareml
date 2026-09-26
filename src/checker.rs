@@ -67,6 +67,7 @@ pub struct Report {
     pub max_depth: usize,
     pub timeout_ms: u128,
     pub input_slots: usize,
+    pub spawn_bounds: std::collections::BTreeMap<String, usize>,
     pub not_checked: Vec<String>,
 }
 impl Report {
@@ -88,7 +89,6 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
         return Err(Error::new(Span::default(), "unknown selected property"));
     }
     let budget = Budget::new(options.timeout);
-    let initial = p.initial()?;
     let claims: Vec<_> = p
         .model
         .claims
@@ -116,6 +116,7 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
                     .into()
             },
             "finite choose alternatives are exhaustive and unfair; weak mailbox progress does not force any choice outcome".into(),
+            "actor definitions create no instances; main constructs one deterministic initial state; main and handler spawns share lifetime bounds, never reuse identities; exhaustion is inconclusive".into(),
             "exact state equality; no symmetry or partial-order reduction".into(),
         ],
         states: 0,
@@ -136,7 +137,8 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
         max_states: options.max_states,
         max_depth: options.max_depth,
         timeout_ms: options.timeout.as_millis(),
-        input_slots: p.check.inputs.len(),
+        input_slots: 0,
+        spawn_bounds: p.check.spawn_bounds.clone(),
         not_checked: p
             .model
             .claims
@@ -145,6 +147,15 @@ pub fn check(source: &str, p: &Program, options: &Options) -> Result<Report> {
             .map(|c| c.name.clone())
             .collect(),
     };
+    let initial = match p.initial_messages(Some(&budget)) {
+        Ok(initial) => initial,
+        Err(error) if error.message.starts_with("LIMIT:") => {
+            report.cutoff = Some(error.message);
+            return Ok(report);
+        }
+        Err(error) => return Err(error),
+    };
+    report.input_slots = initial.inputs.len();
     let mut states = vec![initial.clone()];
     let mut intern = HashMap::from([(initial, 0usize)]);
     let mut graph = Graph {

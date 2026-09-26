@@ -25,6 +25,8 @@ pub struct Choice {
 pub(crate) struct Turn<'a> {
     pub outbox: Outbox,
     pub choices: Vec<Choice>,
+    pub spawns: Vec<crate::spawning::Spawn>,
+    pub inputs: Vec<crate::semantics::ExternalInput>,
     pub calls: Vec<Span>,
     pub budget: Option<&'a Budget>,
     tape: Vec<Choice>,
@@ -131,6 +133,8 @@ impl Program {
             let mut turn = Turn {
                 outbox: Vec::new(),
                 choices: Vec::new(),
+                spawns: Vec::new(),
+                inputs: Vec::new(),
                 calls: Vec::new(),
                 budget,
                 tape: prefix,
@@ -174,7 +178,7 @@ mod tests {
     use super::*;
     #[test]
     fn replay_enabledness_matches_exhaustive_successors() {
-        let source = "actor A { handle_message(m: unit): unit { let n = choose([true, false]); send(A, ()); } } actor B { handle_message(m: unit): unit { () } } property \"p\" { always true } check C { mailbox_bound = 1 inputs { once send(A, ()) once send(B, ()) } fairness { weak runtime.progress } }";
+        let source = "actor A { handle_message(me: Actor<A>): unit { let n = choose([true, false]); send(me, me); } } actor B { handle_message(m: unit): unit { () } } property \"p\" { always true } check C { spawn_bound A = 1 spawn_bound B = 1 mailbox_bound = 1 main { let a = spawn(A); let b = spawn(B); inputs { once send(a, a) once send(b, ()) } } fairness { weak runtime.progress } }";
         let p = crate::compile(source, None).unwrap();
         let initial = p.initial().unwrap();
         let mut seen = std::collections::HashSet::from([initial.clone()]);
@@ -197,7 +201,7 @@ mod tests {
     }
     #[test]
     fn expansion_obeys_the_checkers_deadline() {
-        let source = "actor A { handle_message(m: unit): unit { let n = choose([true, false]); () } } property \"p\" { always true } check C { mailbox_bound = 1 inputs { once send(A, ()) } }";
+        let source = "actor A { handle_message(m: unit): unit { let n = choose([true, false]); () } } property \"p\" { always true } check C { spawn_bound A = 1 mailbox_bound = 1 main { let a = spawn(A); inputs { once send(a, ()) } } }";
         let p = crate::compile(source, None).unwrap();
         let submitted = p.successors(&p.initial().unwrap()).unwrap().remove(1).state;
         let budget = Budget::new(std::time::Duration::ZERO);

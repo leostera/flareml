@@ -34,7 +34,7 @@ fn boolean_transition_tables_temporal_classification_and_replay() {
                     all
                 };
                 let p = format!(
-                    "((!A.state && {}) || (A.state && {}))",
+                    "((!a_view() && {}) || (a_view() && {}))",
                     predicate(false),
                     predicate(true)
                 );
@@ -61,7 +61,7 @@ fn boolean_transition_tables_temporal_classification_and_replay() {
                     ),
                 ] {
                     let source = format!(
-                        "actor A {{ init(): Bool {{ false }} handle_message(s: Bool, m: unit): Bool {{ let result = ((s && {}) || (!s && {})); send(A, ()); result }} }} property \"p\" {{ {formula} }} check C {{ mailbox_bound = 1 inputs {{ once send(A, ()) }} {} }}",
+                        "actor A {{ init(): Bool {{ false }} handle_message(s: Bool, me: Actor<A>): Bool {{ let result = ((s && {}) || (!s && {})); send(me, me); result }} }} let a_view = (): Bool {{ forall (a in instances(A)) {{ a.state == Some(true) }} }} property \"p\" {{ {formula} }} check C {{ spawn_bound A = 1 mailbox_bound = 1 main {{ let a = spawn(A); inputs {{ once send(a, a) }} }} {} }}",
                         next[1],
                         next[0],
                         if fair {

@@ -37,8 +37,11 @@ actor Counter {
   }
 }
 
-property "one increment stays bounded" { always (Counter.state <= 1) }
-property "the increment is possible" { reachable (Counter.state == 1) }
+let bounded = (candidate: Option<Int>): Bool {
+  match candidate { | None -> true | Some(value) -> value <= 1 }
+}
+property "one increment stays bounded" { always (forall (c in instances(Counter)) { bounded(c.state) }) }
+property "the increment is possible" { reachable (exists (c in instances(Counter)) { c.state == Some(1) }) }
 property "submitted work finishes" {
   forall (i in inputs(Counter)) { i.submitted leads_to i.processed }
 }
@@ -46,27 +49,41 @@ property "submitted work finishes" {
 check OneIncrement {
   domain Int = 0..1
   mailbox_bound = 1
-  inputs { once send(Counter, Increment) }
+  spawn_bound Counter = 1
+  main {
+    let counter = spawn(Counter);
+    inputs { once send(counter, Increment) }
+  }
   fairness { weak runtime.progress }
 }
 ```
 
-- A singleton name is its address. `actor Account(id: AccountId)` creates one identity per finite key; use `Account.at(Alice)` and `Actor<Account>`. `Actor<T>` is a typed reference for sending messages, not a mutable state handle.
-- `init` is pure. A stateful handler takes a state value and a message, and returns the next state. Stateless actors omit `init`, take only the message, and return `unit`.
+- `actor Counter` declares a type and creates nothing. `spawn(Counter)` returns a fresh `Actor<Counter>` reference, for routing messages—not accessing mutable state. There are no implicit singleton or keyed populations.
+- `init` is pure; its typed arguments are supplied by `spawn(Type, args...)`. A stateful handler takes a state value and a message, and returns the next state. Stateless actors omit `init`, take only the message, and return `unit`.
 - `send(address, message)` stages a one-way message. State and all outgoing messages commit together when the handler returns. Receivers can run only in later transitions. Replies require explicit protocol messages and reply addresses.
 - Ordinary `let` functions describe local computation. Bindings and intermediate statements require `;`: `let next = state + 1; send(reply_to, Ack); next`. The final unterminated expression is the block's value; a trailing `;` discards it and returns `unit`. A non-tail `match` also requires `;`; match arms use `|`, with braces around multi-statement arms. Whitespace alone is not a statement separator. Exhaustive `match`, records, variants, `Option<T>`, and `Result<T, E>` describe finite data.
 - Properties are read-only expressions. Local `let` bindings work in functions and handlers, not directly inside a property body; call a pure/specification helper when a predicate needs local bindings. Top-level `let` declares functions, not constants. A handler cannot inspect another participant's state or use observation views.
-- `check` describes an experiment, not a `main()` function. `once send(...)` means **at most once**, not guaranteed arrival.
+- Every `check` has a deterministic `main { ... }` setup block, run once before exploration. It creates the initial population and may enqueue messages. Its bindings remain local. Optional `inputs { once send(...) }` declarations inside `main` capture those references; each input is submitted **at most once**, never forced. `main {}` creates nothing.
 
-No suspended calls, threads, storage backends, crashes, retries, timers, imports, or dynamic spawning are built in. Model intervening steps explicitly: a read followed by a write must be two protocol turns if other participants can act between them. Atomic turns are modeling assumptions, not a guarantee made by an HTTP service or real transport.
+No suspended calls, threads, storage backends, crashes, retries, timers, or imports are built in. Model intervening steps explicitly: a read followed by a write must be two protocol turns if other participants can act between them. Atomic turns are modeling assumptions, not a guarantee made by an HTTP service or real transport.
 
 ## Explicit nondeterminism
 
-`let outcome = choose([Deliver, Drop, Duplicate]);` branches a handler turn over **every** listed outcome. It is not random sampling and does not suspend the handler. Use a nonempty literal list of compatible, pure candidate expressions; `choose` must be the whole initializer of a local binding. Handler-only helpers may choose transitively. Initialization, properties, input declarations, and pure expression contexts cannot choose.
+`let outcome = choose([Deliver, Drop, Duplicate]);` branches a handler turn over **every** listed outcome. It is not random sampling and does not suspend the handler. Use a nonempty literal list of compatible, pure candidate expressions; `choose` must be the whole initializer of a local binding. Handler-only helpers may choose transitively. Setup, initialization, properties, input declarations, and pure expression contexts cannot choose.
 
 A link actor can choose to forward, drop, or duplicate a packet while the underlying engine mailboxes remain fault-free FIFO. See [loss](examples/faulty-link-loss.fml), [duplicate application](examples/faulty-link-duplicate-bug.fml), and its [idempotent repair](examples/faulty-link-duplicate-fixed.fml). Weak mailbox fairness does **not** force a favorable choice or eventual delivery. Reordering requires an explicit buffer, not just a different choice label.
 
 Expansion is bounded: at most 128 encounters per turn and 4096 prefix executions, sharing the 100,000-entry evaluation budget across alternatives. Exceeding a guard is inconclusive, not permission to prune alternatives and verify the rest. [RFD0003](docs/rfds/RFD0003-nondeterministic-choice-and-faulty-links.md) specifies the execution and evidence contract.
+
+## Bounded dynamic spawning
+
+`actor Worker { ... }` defines a participant type. Both setup and handlers can use `let worker = spawn(Worker); send(worker, job);`. Pure initializer arguments are optional according to the declared `init` signature. Direct discarded `spawn(Worker);` is also allowed; it sends no implicit startup message. Allocation, initial state, and outgoing sends publish atomically at setup completion or handler commit. No participant runs midway through setup.
+
+Every check supplies `spawn_bound Worker = N` (`0..4096`) for **each actor definition**, including unused definitions (use zero). Setup consumes the same lifetime pool as handler creation. Identities are never reused, even after work completes. Exhaustion is inconclusive, not modeled rejection or blocked creation. Identities are independent of `Int` domains.
+
+In properties, `instances(Worker)` ranges over all N stable potential slots, including unborn ones. Fields are `created`, `reference: Option<Actor<Worker>>`, and, for stateful workers, `state: Option<StateType>`. Before creation these are false/None. This makes `forall (w in instances(Worker)) { w.created leads_to w.state == Some(true) }` meaningful for workers created later. External input slots capture references created during `main`. Later-created actors receive work through explicit sends. A definition name is not a reference, and setup bindings are not global property variables.
+
+See [correlated jobs](examples/spawn-workers.fml), [choice plus spawn](examples/spawn-choice-workers.fml), and [RFD0004](docs/rfds/RFD0004-bounded-spawn.md). No termination, restart, suspension, reentrancy, or automatic self reference is implied. A creator can pass the new reference in an explicit message.
 
 ## One property declaration
 
@@ -81,7 +98,7 @@ Expansion is bounded: at most 128 encounters per turn and 4096 prefix executions
 | `eventually always P` | P eventually remains true | A repeating counterexample |
 | `always (P implies always Q)` | After P, Q remains true | A finite bad prefix |
 
-P and Q are state predicates. Parenthesize compound predicates: `always (A.state == Done implies B.state)`.
+P and Q are state predicates. Parenthesize compound predicates: `always (finished() implies committed())`.
 
 Bare predicate properties are rejected. `reachable` is allowed only as the whole property body, over a state predicate. `exists` quantifies finite **data**, not executions. Temporal conjunction and stable `forall` are supported; arbitrary temporal nesting, temporal disjunction/negation, `next`, and strong fairness are not.
 
@@ -91,13 +108,14 @@ Without fairness, stuttering forever is allowed. `weak runtime.progress` prevent
 
 ## Observing work
 
-`inputs(A)` ranges over A's declared external slots across all keys. Each has `payload`, `target`, `submitted`, and `processed` fields. The flags are monotone; processing means its own handler committed, **not** that a reply arrived.
+`inputs(A)` ranges over the external slots registered in setup for instances of A. Each has `payload`, `target`, `submitted`, and `processed` fields. The flags are monotone; processing means its own handler committed, **not** that a reply arrived.
 
-`messages(A)` includes generated messages through `message_bound = N` stable lifetime slots per actor declaration, across keys. Fields are `sent`, `processed`, `external`, `payload: Option<Message>`, and `target: Option<Actor<A>>`. Unsent slots have false flags and `None` data. Identical sends get different slots; slots never recycle.
+`messages(A)` includes generated messages through `message_bound = N` stable lifetime slots per actor definition, across all its instances. Fields are `sent`, `processed`, `external`, `payload: Option<Message>`, and `target: Option<Actor<A>>`. Unsent slots have false flags and `None` data. Identical sends get different slots; slots never recycle.
 
 The distinction between bounds matters:
 - `mailbox_bound`: maximum **pending messages per address**, required.
-- `message_bound`: maximum **lifetime observed sends per actor declaration**, optional.
+- `message_bound`: maximum **lifetime observed sends per actor definition**, including setup sends, optional.
+- `spawn_bound A`: maximum **lifetime instances of A**, including setup creation, required per definition.
 
 Exhaustion is inconclusive, not message loss or blocked sending. Omit lifetime history when checking infinite finite-state message cycles; with it, an unbounded sending protocol eventually exhausts the pool. Unused slots are reported separately from an empty temporal quantifier.
 
@@ -133,7 +151,7 @@ Use `--artifacts-dir /path/to/runs` to change the parent directory. The location
 
 Verified properties need no witness; inconclusive runs do not fabricate evidence. `--trace-out` additionally exports one selected witness. Replay against the saved source, for example `fml replay .fml/runs/<run-id>/model.fml .fml/runs/<run-id>/witnesses/0000.json`. Reports are records of checker output, not independently checkable proof certificates.
 
-Replay re-executes actions, compares snapshots and provenance, checks source identity, loop closure and fairness, and independently interprets the property on the trace. Choice transcripts are replayed exactly, including encounter order, helper call sites, candidate positions, and values. Only the current artifact format (**7**) is accepted; regenerate traces after source or format changes. Versioning artifacts does not select runtime behavior.
+Replay reruns deterministic `main` and compares the complete initial snapshot, including captured inputs, before re-executing actions. It compares snapshots and provenance, checks source identity, loop closure and fairness, and independently interprets the property on the trace. Choice transcripts are replayed exactly, including encounter order, helper call sites, candidate positions, and values. Allocations are reconstructed and checked for freshness, initialization, bounds, and atomic publication. Only the current artifact format (**8**) is accepted; regenerate traces after source or format changes. Versioning artifacts does not select runtime behavior.
 
 Reports support automatic color, `--color always|never|auto`, and `NO_COLOR`. JSON never contains presentation ANSI escapes. The full syntax, precedence, assumptions, limits, and deferred features are in [RFD0002](docs/rfds/RFD0002-functions-and-actors.md).
 
@@ -151,7 +169,9 @@ cargo test --locked
 - FIFO scheduler transitions and cutoffs;
 - all 729 three-state/two-message deterministic transition tables;
 - 160 source-to-verdict Boolean self-message cases using an independent orbit/cycle oracle, including optional input starvation and weak fairness;
-- independent Cartesian enumeration of small choice lists, dependent helper choices/outboxes, branch-specific encounters, and choice-fairness regressions.
+- independent Cartesian enumeration of small choice lists, dependent helper choices/outboxes, branch-specific encounters, and choice-fairness regressions;
+- every reachable transition of a tiny two-coordinator allocation machine across four creation bounds and both fairness settings, plus future-instance temporal and allocation-replay regressions;
+- 155 explicit setup configurations against independently expected initial populations, initializer values, FIFO queues, captured inputs, provenance, and creation cutoffs.
 
 Metamorphic regressions check actor renaming, declaration reordering, and persistence of concrete counterexamples under larger mailbox bounds. Inventory reservation and payment idempotency each have a failing model and an atomic-boundary repair, with reachable completion checks.
 
@@ -173,4 +193,4 @@ cargo +nightly fuzz run trace_json -- -max_total_time=120
 
 A separate optional scheduled/manual workflow runs these campaigns and saves artifacts. See the [acceptance checklist](docs/rfds/RFD0002-implementation-checklist.md) for completed work and remaining validation.
 
-The [RFD roadmap](docs/rfds/README.md) proceeds one milestone at a time: choice and faulty links are implemented; bounded dynamic spawning and explicit suspension/reentrancy remain unimplemented sketches.
+The [RFD roadmap](docs/rfds/README.md) proceeds one milestone at a time: choice, faulty links, and bounded dynamic spawning are implemented; explicit suspension/reentrancy remains an unimplemented sketch.

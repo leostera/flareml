@@ -12,7 +12,7 @@ fn run(source: &str) -> checker::Report {
     checker::check(source, &compile(source, None).unwrap(), &Options::default()).unwrap()
 }
 fn tiny(claim: &str) -> String {
-    format!("{claim}\ncheck Main {{ mailbox_bound = 1 }}")
+    format!("{claim}\ncheck Main {{ mailbox_bound = 1 main {{}} }}")
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn unsupported_temporal_forms_are_rejected() {
 #[test]
 fn effects_and_unknown_names_cannot_hide_in_properties() {
     for body in [
-        "send(Client.at(User), Counted(First, 0)) == ()",
+        "forall (client in instances(Client)) { send(client.reference, Counted(First, 0)) == () }",
         "true || unknown_name",
     ] {
         assert!(
@@ -157,7 +157,10 @@ fn effects_and_unknown_names_cannot_hide_in_properties() {
 #[test]
 fn syntax_and_type_errors_fail_closed() {
     for src in [
-        FIXED.replace("Counter.at(Main)", "Counter.at(User)"),
+        FIXED.replace(
+            "send(counter, Inc(client, First))",
+            "send(client, Inc(client, First))",
+        ),
         FIXED.replace("| Counted(_, _) -> Observed", ""),
         FIXED.replace("| Counted(_, _) -> Observed", "| Counted(_, _) -> First"),
         FIXED.replace("weak runtime.progress", "strong runtime.progress"),
@@ -170,10 +173,7 @@ fn syntax_and_type_errors_fail_closed() {
 }
 #[test]
 fn empty_temporal_quantifier_reports_vacuity() {
-    let src = FIXED.replace(
-        "once send(Counter.at(Main), Inc(Client.at(User), First))",
-        "",
-    );
+    let src = FIXED.replace("once send(counter, Inc(client, First))", "");
     let r = run(&src);
     assert_eq!(r.status, Status::VerifiedInScope);
     assert!(r.claims.iter().any(|c| {
@@ -185,7 +185,9 @@ fn empty_temporal_quantifier_reports_vacuity() {
 }
 #[test]
 fn multiple_checks_and_properties_require_explicit_selection() {
-    let src = format!("{FIXED}\ncheck Other {{ mailbox_bound = 1 }}");
+    let src = format!(
+        "{FIXED}\ncheck Other {{ spawn_bound Counter = 0 spawn_bound Client = 0 mailbox_bound = 1 main {{}} }}"
+    );
     assert!(compile(&src, None).is_err());
     assert!(compile(&src, Some("OneIncrement")).is_ok());
     assert!(compile(&src, Some("missing")).is_err());

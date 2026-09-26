@@ -23,10 +23,7 @@ fn asynchronous_reply_is_a_separate_turn_after_commit() {
     assert!(!trace.actions[0].fair); // environment is optional
     assert!(trace.actions[1].description.contains("enqueue 1 message"));
     assert!(trace.actions[2].description.contains("Counted"));
-    assert_eq!(
-        trace.states[2].keyed_actors["Counter"][&Value::Variant("Main".into(), vec![])],
-        Value::Int(1)
-    );
+    assert_eq!(trace.states[2].spawned["Counter"][0], Value::Int(1));
     trace.validate(REPLY, &program).unwrap();
     let mut old = trace.clone();
     old.format_version = 4;
@@ -45,7 +42,7 @@ fn asynchronous_reply_is_a_separate_turn_after_commit() {
 
 #[test]
 fn failing_invariant_has_a_replayable_message_trace() {
-    let source = REPLY.replace("Counter.at(Main).state == 1", "Counter.at(Main).state == 0");
+    let source = REPLY.replace("counter.state == Some(1)", "counter.state == Some(0)");
     let program = compile(&source, None).unwrap();
     let report = run(&source);
     assert_eq!(report.status, Status::Violated);
@@ -57,14 +54,14 @@ fn failing_invariant_has_a_replayable_message_trace() {
 #[test]
 fn same_address_is_fifo_and_callback_sends_are_in_source_order() {
     let source = r#"
-type Start = Start
+type Start = Start(Actor<Target>)
  type Message = First | Second
 actor Sender {
   handle_message(message: Start): unit {
     match message {
-      | Start -> {
-          send(Target, First);
-          send(Target, Second);
+      | Start(target) -> {
+          send(target, First);
+          send(target, Second);
           ()
         }
     }
@@ -79,12 +76,13 @@ actor Target {
     }
   }
 }
-property "second cannot overtake first" { always (Target.state != 2) }
-property "second processed after first" { reachable (Target.state == 3) }
+property "second cannot overtake first" { always (forall (target in instances(Target)) { target.state != Some(2) }) }
+property "second processed after first" { reachable (exists (target in instances(Target)) { target.state == Some(3) }) }
 check C {
   domain Int = 0..3
   mailbox_bound = 2
-  inputs { once send(Sender, Start) }
+  spawn_bound Sender = 1 spawn_bound Target = 1
+  main { let sender = spawn(Sender); let target = spawn(Target); inputs { once send(sender, Start(target)) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -112,11 +110,12 @@ actor B {
   init(): Bool { false }
   handle_message(state: Bool, msg: Tick): Bool { true }
 }
-property "both values are Booleans" { always (A.state || !A.state) }
-property "both have processed" { reachable (A.state && B.state) }
+property "both values are Booleans" { always (forall (a in instances(A)) { a.state == Some(true) || a.state == Some(false) }) }
+property "both have processed" { reachable ((exists (a in instances(A)) { a.state == Some(true) }) && (exists (b in instances(B)) { b.state == Some(true) })) }
 check C {
   mailbox_bound = 1
-  inputs { once send(A, Tick) once send(B, Tick) }
+  spawn_bound A = 1 spawn_bound B = 1
+  main { let a = spawn(A); let b = spawn(B); inputs { once send(a, Tick) once send(b, Tick) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -127,10 +126,12 @@ check C {
 
 #[test]
 fn mailbox_capacity_is_inconclusive_not_dropped() {
-    let source = REPLY.replace("mailbox_bound = 2", "mailbox_bound = 1").replace(
-        "once send(Counter.at(Main), Inc(Client.at(User), First))",
-        "once send(Counter.at(Main), Inc(Client.at(User), First)) once send(Counter.at(Main), Inc(Client.at(User), First))",
-    );
+    let source = REPLY
+        .replace("mailbox_bound = 2", "mailbox_bound = 1")
+        .replace(
+            "once send(counter, Inc(client, First))",
+            "once send(counter, Inc(client, First)) once send(counter, Inc(client, First))",
+        );
     let report = run(&source);
     assert_eq!(report.status, Status::Inconclusive);
     assert!(report.cutoff.unwrap().contains("mailbox capacity"));
@@ -139,22 +140,23 @@ fn mailbox_capacity_is_inconclusive_not_dropped() {
 #[test]
 fn self_send_commits_after_dequeue_and_remains_finite() {
     let source = r#"
-type Tick = Tick
+type Tick = Tick(Actor<Loop>)
 actor Loop {
   init(): Bool { false }
   handle_message(state: Bool, msg: Tick): Bool {
     match msg {
-      | Tick -> {
-          send(Loop, Tick);
+      | Tick(me) -> {
+          send(me, Tick(me));
           !state
         }
     }
   }
 }
-property "loop runs" { reachable Loop.state }
+property "loop runs" { reachable (exists (participant in instances(Loop)) { participant.state == Some(true) }) }
 check C {
   mailbox_bound = 1
-  inputs { once send(Loop, Tick) }
+  spawn_bound Loop = 1
+  main { let participant = spawn(Loop); inputs { once send(participant, Tick(participant)) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -176,8 +178,8 @@ check C {
         1
     );
     let waiting = source.replace(
-        "property \"loop runs\" { reachable Loop.state }",
-        "property \"optional input can starve\" { eventually Loop.state }",
+        "property \"loop runs\" { reachable (exists (participant in instances(Loop)) { participant.state == Some(true) }) }",
+        "property \"optional input can starve\" { eventually (exists (participant in instances(Loop)) { participant.state == Some(true) }) }",
     );
     let p = compile(&waiting, None).unwrap();
     let report = run(&waiting);
@@ -189,17 +191,18 @@ check C {
 }
 
 #[test]
-fn keyed_stateless_addresses_have_independent_mailboxes() {
+fn stateless_instances_have_independent_mailboxes() {
     let source = r#"
 type Key = Left | Right
  type Tick = Tick
-actor Shard(id: Key) {
+actor Shard {
   handle_message(message: Tick): unit { () }
 }
 property "typed inputs are finite" { always true }
 check C {
   mailbox_bound = 1
-  inputs { once send(Shard.at(Left), Tick) once send(Shard.at(Right), Tick) }
+  spawn_bound Shard = 2
+  main { let left = spawn(Shard); let right = spawn(Shard); inputs { once send(left, Tick) once send(right, Tick) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -211,11 +214,11 @@ check C {
 }
 
 #[test]
-fn singleton_address_can_be_initialized_before_target_declaration() {
+fn reference_can_be_initialized_before_target_declaration() {
     let source = r#"
 type Tick = Tick
 actor Earlier {
-  init(): Actor<Later> { Later }
+  init(target: Actor<Later>): Actor<Later> { target }
   handle_message(state: Actor<Later>, msg: Tick): Actor<Later> {
     send(state, msg);
     state
@@ -225,10 +228,11 @@ actor Later {
   init(): Bool { false }
   handle_message(state: Bool, msg: Tick): Bool { true }
 }
-property "later receives" { reachable Later.state }
+property "later receives" { reachable (exists (later in instances(Later)) { later.state == Some(true) }) }
 check C {
   mailbox_bound = 1
-  inputs { once send(Earlier, Tick) }
+  spawn_bound Earlier = 1 spawn_bound Later = 1
+  main { let later = spawn(Later); let earlier = spawn(Earlier, later); inputs { once send(earlier, Tick) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -242,16 +246,16 @@ check C {
 #[test]
 fn transitive_send_helper_is_staged_and_init_cannot_send() {
     let source = REPLY.replace(
-        "actor Counter(id: CounterId) {",
-        "let notify = (address: Actor<Client>, message: ClientMessage): unit { send(address, message) }\nactor Counter(id: CounterId) {",
+        "actor Counter {",
+        "let notify = (address: Actor<Client>, message: ClientMessage): unit { send(address, message) }\nactor Counter {",
     ).replace(
         "send(reply_to, Counted(request_id, next))",
         "notify(reply_to, Counted(request_id, next))",
     );
     assert_eq!(run(&source).status, Status::VerifiedInScope);
     let bad = source.replace(
-        "init(id: CounterId): Int { 0 }",
-        "init(id: CounterId): Int { notify(Client.at(User), Counted(First, 0)); 0 }",
+        "init(): Int { 0 }",
+        "init(client: Actor<Client>): Int { notify(client, Counted(First, 0)); 0 }",
     );
     assert!(
         compile(&bad, None)
@@ -268,7 +272,7 @@ fn unsupported_effects_and_message_types_fail_closed() {
             "mailbox_bound = 2",
             "semantics = \"actors-v1\" mailbox_bound = 2",
         ),
-        REPLY.replace("Inc(Client.at(User), First)", "Counted(First, 1)"),
+        REPLY.replace("Inc(client, First)", "Counted(First, 1)"),
         REPLY.replace(
             "send(reply_to, Counted(request_id, next))",
             "send(reply_to, Inc(reply_to, request_id))",

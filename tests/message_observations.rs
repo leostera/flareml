@@ -52,7 +52,7 @@ property "inputs processed only after submission" {
 }
 property "observations are typed" {
   always (forall (m in messages(Sink)) {
-    m.sent implies m.payload == Some(Ping) && m.target == Some(Sink) && m.external
+    m.sent implies m.payload == Some(Ping) && (exists (sink in instances(Sink)) { sink.reference == m.target }) && m.external
   })
 }
 property "every external input progresses" {
@@ -67,7 +67,8 @@ property "two sends of equal payload are distinct" {
 check C {
   mailbox_bound = 2
   message_bound = 2
-  inputs { once send(Sink, Ping) once send(Sink, Ping) }
+  spawn_bound Sink = 1
+  main { let sink = spawn(Sink); inputs { once send(sink, Ping) once send(sink, Ping) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -102,18 +103,19 @@ fn identical_payloads_keep_separate_input_and_message_identities() {
 fn two_senders_can_enqueue_in_either_order_without_merging_envelopes() {
     let source = r#"
 type Msg = Start | First | Second
-actor A { handle_message(msg: Msg): unit { send(Sink, First) } }
-actor B { handle_message(msg: Msg): unit { send(Sink, Second) } }
+actor A { handle_message(sink: Actor<Sink>): unit { send(sink, First) } }
+actor B { handle_message(sink: Actor<Sink>): unit { send(sink, Second) } }
 actor Sink {
   init(): Msg { Start }
   handle_message(state: Msg, msg: Msg): Msg { msg }
 }
 property "generated work completes" { forall (m in messages(Sink)) { m.sent leads_to m.processed } }
-property "A then B" { reachable (Sink.state == Second && forall (m in messages(Sink)) { m.processed }) }
-property "B then A" { reachable (Sink.state == First && forall (m in messages(Sink)) { m.processed }) }
+property "A then B" { reachable ((exists (sink in instances(Sink)) { sink.state == Some(Second) }) && forall (m in messages(Sink)) { m.processed }) }
+property "B then A" { reachable ((exists (sink in instances(Sink)) { sink.state == Some(First) }) && forall (m in messages(Sink)) { m.processed }) }
 check C {
   mailbox_bound = 2 message_bound = 2
-  inputs { once send(A, Start) once send(B, Start) }
+  spawn_bound A = 1 spawn_bound B = 1 spawn_bound Sink = 1
+  main { let a = spawn(A); let b = spawn(B); let sink = spawn(Sink); inputs { once send(a, sink) once send(b, sink) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -147,12 +149,13 @@ fn observation_capacity_is_a_cutoff_not_slot_reuse() {
 fn observation_slots_never_recycle_even_in_self_sending_cycles() {
     let source = r#"
 type Msg = Ping
-actor Loop { handle_message(msg: Msg): unit { send(Loop, msg) } }
+actor Loop { handle_message(me: Actor<Loop>): unit { send(me, me) } }
 property "all sends finish" { forall (m in messages(Loop)) { m.sent leads_to m.processed } }
 check C {
   mailbox_bound = 1
   message_bound = 3
-  inputs { once send(Loop, Ping) }
+  spawn_bound Loop = 1
+  main { let participant = spawn(Loop); inputs { once send(participant, participant) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -200,8 +203,8 @@ fn unsent_slot_defaults_and_input_payload_are_explicit() {
     let p = compile(TWINS, None).unwrap();
     let s = p.initial().unwrap();
     assert!(s.messages.is_empty());
-    let source = TWINS.replace("m.sent implies m.payload == Some(Ping) && m.target == Some(Sink) && m.external", "(!m.sent implies m.payload == None && m.target == None && !m.processed && !m.external) && (m.processed implies m.sent)").replace(
-        "i.processed implies i.submitted", "i.payload == Ping && i.target == Sink && (i.processed implies i.submitted)");
+    let source = TWINS.replace("m.sent implies m.payload == Some(Ping) && (exists (sink in instances(Sink)) { sink.reference == m.target }) && m.external", "(!m.sent implies m.payload == None && m.target == None && !m.processed && !m.external) && (m.processed implies m.sent)").replace(
+        "i.processed implies i.submitted", "i.payload == Ping && (exists (sink in instances(Sink)) { sink.reference == Some(i.target) }) && (i.processed implies i.submitted)");
     assert_eq!(run(&source).status, Status::VerifiedInScope);
 }
 
@@ -261,12 +264,13 @@ fn input_completion_does_not_mean_reply_or_followup_completion() {
 fn busy_self_sender_cannot_starve_a_different_enabled_mailbox_under_fairness() {
     let source = r#"
 type Msg = Ping
-actor Busy { handle_message(msg: Msg): unit { send(Busy, msg) } }
+actor Busy { handle_message(me: Actor<Busy>): unit { send(me, me) } }
 actor Victim { handle_message(msg: Msg): unit { () } }
 property "victim progresses" { forall (i in inputs(Victim)) { i.submitted leads_to i.processed } }
 check C {
   mailbox_bound = 1
-  inputs { once send(Busy, Ping) once send(Victim, Ping) }
+  spawn_bound Busy = 1 spawn_bound Victim = 1
+  main { let busy = spawn(Busy); let victim = spawn(Victim); inputs { once send(busy, busy) once send(victim, Ping) } }
   fairness { weak runtime.progress }
 }
 "#;
@@ -302,10 +306,11 @@ actor Client {
   init(): Bool { false }
   handle_message(state: Bool, msg: Msg): Bool { true }
 }
-property "missing reply" { Client.state leads_to !Client.state }
+property "missing reply" { forall (client in instances(Client)) { client.state == Some(true) leads_to client.state == Some(false) } }
 check C {
   mailbox_bound = 1
-  inputs { once send(Client, Start) }
+  spawn_bound Client = 1
+  main { let client = spawn(Client); inputs { once send(client, Start) } }
   fairness { weak runtime.progress }
 }
 "#;

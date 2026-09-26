@@ -54,15 +54,15 @@ fn reference(
 
 fn snapshot(s: &State) -> Snapshot {
     let mut queues = [vec![], vec![]];
-    for (target, name) in ["A", "B"].iter().enumerate() {
-        let address = Value::Address((*name).into(), Box::new(Value::Unit));
-        queues[target] = s.mailboxes[&address]
+    for (target, queue) in queues.iter_mut().enumerate() {
+        let address = Value::Address("Node".into(), Box::new(Value::Identity(target)));
+        *queue = s.mailboxes[&address]
             .iter()
             .map(|m| {
                 let Value::Variant(name, args) = &m.payload else {
                     panic!("not a message")
                 };
-                assert!(args.is_empty());
+                assert_eq!(args.len(), usize::from(name == "Hop"));
                 (
                     match name.as_str() {
                         "Hop" => false,
@@ -98,19 +98,22 @@ fn native_scheduler_matches_independent_fifo_machine() {
                     .map(|&(a, stop)| {
                         format!(
                             "once send({}, {})",
-                            ["A", "B"][a],
-                            if stop { "Stop" } else { "Hop" }
+                            ["a", "b"][a],
+                            if stop {
+                                "Stop".into()
+                            } else {
+                                format!("Hop({})", ["b", "a"][a])
+                            }
                         )
                     })
                     .collect::<Vec<_>>()
                     .join(" ");
                 let source = format!(
                     r#"
-type Msg = Hop | Stop
-actor A {{ handle_message(msg: Msg): unit {{ match msg {{ | Hop -> send(B, Stop) | Stop -> () }} }} }}
-actor B {{ handle_message(msg: Msg): unit {{ match msg {{ | Hop -> send(A, Stop) | Stop -> () }} }} }}
+type Msg = Hop(Actor<Node>) | Stop
+actor Node {{ handle_message(msg: Msg): unit {{ match msg {{ | Hop(other) -> send(other, Stop) | Stop -> () }} }} }}
 property "reference corpus" {{ always true }}
-check C {{ mailbox_bound = {bound} inputs {{ {inputs} }} {} }}
+check C {{ spawn_bound Node = 2 mailbox_bound = {bound} main {{ let a = spawn(Node); let b = spawn(Node); inputs {{ {inputs} }} }} {} }}
 "#,
                     if fair {
                         "fairness { weak runtime.progress }"
@@ -149,8 +152,11 @@ check C {{ mailbox_bound = {bound} inputs {{ {inputs} }} {} }}
                                         )
                                         .unwrap();
                                         match value {
-                                            Value::Address(n, _) => {
-                                                format!("process:{}", usize::from(n == "B"))
+                                            Value::Address(_, key) => {
+                                                let Value::Identity(index) = key.as_ref() else {
+                                                    panic!("not an identity")
+                                                };
+                                                format!("process:{index}")
                                             }
                                             _ => panic!("not an address"),
                                         }

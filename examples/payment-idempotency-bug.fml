@@ -1,49 +1,72 @@
-// Two deliveries of payment A, one delivery of distinct payment B.
-// Duplicate delivery is an explicit workload, not an engine fault mode.
-// Processor represents the charge boundary; no crashes, lost replies, refunds,
-// or separate non-transactional external charge API are modeled.
+// Two deliveries of payment A, one of distinct payment B. Routing is explicit.
+// The processor is the atomic charge boundary, not a separate external API.
+// No crashes, lost replies, refunds, or persistence are modeled.
 type PaymentId = PaymentA | PaymentB
-type Request = Pay(PaymentId) | Receipt
-type Debit = Debit
+type Request = Pay(PaymentId, Actor<Gateway>) | Receipt
+type Debit = Debit(Actor<Gateway>)
 type Ledger = Fresh | Recorded
-type PaymentState = PaymentState { ledger: Ledger, charges: Int, deliveries: Int }
+type Routes = Routes { a: Actor<Processor>, b: Actor<Processor> }
+type PaymentState = PaymentState { id: PaymentId, ledger: Ledger, charges: Int, deliveries: Int }
 actor Gateway {
-  handle_message(request: Request): unit {
+  init(a: Actor<Processor>, b: Actor<Processor>): Routes { Routes { a: a, b: b } }
+  handle_message(state: Routes, request: Request): Routes {
     match request {
-      | Pay(id) -> send(Processor.at(id), Debit)
+      | Pay(id, reply_to) -> {
+          match id { | PaymentA -> send(state.a, Debit(reply_to)) | PaymentB -> send(state.b, Debit(reply_to)) }
+        }
       | Receipt -> ()
-    }
+    };
+    state
   }
 }
-actor Processor(id: PaymentId) {
-  init(id: PaymentId): PaymentState { PaymentState { ledger: Fresh, charges: 0, deliveries: 0 } }
+actor Processor {
+  init(id: PaymentId): PaymentState { PaymentState { id: id, ledger: Fresh, charges: 0, deliveries: 0 } }
   handle_message(state: PaymentState, request: Debit): PaymentState {
-    send(Gateway, Receipt);
-    PaymentState { ledger: Recorded, charges: state.charges + 1, deliveries: state.deliveries + 1 }
+    match request { | Debit(reply_to) -> send(reply_to, Receipt) };
+    PaymentState { id: state.id, ledger: Recorded, charges: state.charges + 1, deliveries: state.deliveries + 1 }
+  }
+}
+let charges = (candidate: Option<PaymentState>): Int {
+  match candidate { | None -> 0 | Some(state) -> state.charges }
+}
+let delivered = (candidate: Option<PaymentState>, id: PaymentId, count: Int): Bool {
+  match candidate { | None -> false | Some(state) -> state.id == id && state.deliveries == count }
+}
+let charged = (candidate: Option<PaymentState>, request: Request): Bool {
+  match candidate {
+    | None -> false
+    | Some(state) -> { match request { | Pay(id, reply_to) -> state.id == id && state.charges >= 1 | Receipt -> false } }
   }
 }
 property "at most one charge per payment key" {
-  always (forall (id in PaymentId) { Processor.at(id).state.charges <= 1 })
+  always (forall (processor in instances(Processor)) { charges(processor.state) <= 1 })
 }
 property "distinct payments can both charge" {
-  reachable (Processor.at(PaymentA).state.charges == 1 && Processor.at(PaymentB).state.charges == 1)
+  reachable (forall (processor in instances(Processor)) { charges(processor.state) == 1 })
 }
 property "the duplicate can be fully processed" {
-  reachable (Processor.at(PaymentA).state.deliveries == 2 && Processor.at(PaymentB).state.deliveries == 1)
+  reachable ((exists (processor in instances(Processor)) { delivered(processor.state, PaymentA, 2) }) &&
+    (exists (processor in instances(Processor)) { delivered(processor.state, PaymentB, 1) }))
 }
 property "submitted payments eventually charge" {
-  forall (id in PaymentId) {
-    (exists (i in inputs(Gateway)) { i.payload == Pay(id) && i.submitted })
-      leads_to Processor.at(id).state.charges >= 1
+  forall (i in inputs(Gateway)) {
+    i.submitted leads_to (exists (processor in instances(Processor)) { charged(processor.state, i.payload) })
   }
 }
 check DuplicatePayment {
   domain Int = 0..2
+  spawn_bound Processor = 2
+  spawn_bound Gateway = 1
   mailbox_bound = 3
-  inputs {
-    once send(Gateway, Pay(PaymentA))
-    once send(Gateway, Pay(PaymentA))
-    once send(Gateway, Pay(PaymentB))
+  main {
+    let a = spawn(Processor, PaymentA);
+    let b = spawn(Processor, PaymentB);
+    let gateway = spawn(Gateway, a, b);
+    inputs {
+      once send(gateway, Pay(PaymentA, gateway))
+      once send(gateway, Pay(PaymentA, gateway))
+      once send(gateway, Pay(PaymentB, gateway))
+    }
   }
   fairness { weak runtime.progress }
 }

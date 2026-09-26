@@ -9,8 +9,8 @@ actor A {
   init(): Bool { false }
   handle_message(state: Bool, msg: Msg): Bool { true }
 }
-property "state has a Boolean type" { always (A.state || !A.state) }
-check C { mailbox_bound = 1 inputs { once send(A, Ping) } fairness { weak runtime.progress } }
+property "state has a Boolean type" { always (forall (a in instances(A)) { a.state == Some(true) || a.state == Some(false) }) }
+check C { spawn_bound A = 1 mailbox_bound = 1 main { let a = spawn(A); inputs { once send(a, Ping) } } fairness { weak runtime.progress } }
 "#;
 
 #[test]
@@ -37,7 +37,10 @@ fn recursive_or_deep_data_and_call_graphs_fail_before_execution() {
 
 #[test]
 fn pratt_chains_and_combined_helper_nesting_are_bounded() {
-    let deep = BASE.replace("A.state || !A.state", &vec!["true"; 5000].join(" && "));
+    let deep = BASE.replace(
+        "a.state == Some(true) || a.state == Some(false)",
+        &vec!["true"; 5000].join(" && "),
+    );
     assert!(
         compile(&deep, None)
             .unwrap_err()
@@ -119,41 +122,36 @@ fn pure_helpers_cannot_hide_out_of_domain_intermediate_values() {
 }
 
 #[test]
-fn keyed_state_requires_an_address_and_init_aliases_are_transparent() {
+fn initializer_aliases_are_transparent_but_definitions_are_not_references() {
     let source = BASE
-        .replace("actor A {", "type Key = Int\nactor A(id: Key) {")
-        .replace("init(): Bool", "init(key: Int): Bool")
-        .replace("A.state", "A.at(0).state")
-        .replace("send(A, Ping)", "send(A.at(0), Ping)")
+        .replace("actor A {", "type Key = Int\nactor A {")
+        .replace("init(): Bool", "init(key: Key): Bool")
+        .replace("spawn(A)", "spawn(A, 0)")
         .replace("mailbox_bound = 1", "mailbox_bound = 1 domain Int = 0..1");
     let p = compile(&source, None).unwrap();
-    assert_eq!(p.initial().unwrap().keyed_actors["A"].len(), 2);
-    assert!(
-        compile(&source.replace("A.at(0).state", "A.state"), None)
-            .unwrap_err()
-            .message
-            .contains("keyed state")
-    );
+    assert_eq!(p.initial().unwrap().spawned["A"].len(), 1);
+    assert!(compile(&source.replace("send(a, Ping)", "send(A, Ping)"), None).is_err());
 }
 
 #[test]
-fn address_initialization_is_declaration_order_independent_and_enumerable() {
+fn address_initialization_is_explicit_and_declaration_order_independent() {
     let source = r#"
 type Key = Left | Right
 type Msg = Ping
 type Routes = Route(Actor<Z>)
 actor A {
-  init(): Actor<Z> { Z.at(Right) }
+  init(target: Actor<Z>): Actor<Z> { target }
   handle_message(state: Actor<Z>, msg: Msg): Actor<Z> { send(state, msg); state }
 }
-actor Z(id: Key) {
-  init(key: Key): Bool { false }
+actor Z {
+  init(): Bool { false }
   handle_message(state: Bool, msg: Msg): Bool { true }
 }
-property "input is processed" { forall (i in inputs(A)) { i.submitted leads_to Z.at(Right).state } }
-property "left remains isolated" { always (!Z.at(Left).state) }
-property "address-bearing domain is finite" { reachable (exists (r in Routes) { r == Route(Z.at(Right)) }) }
-check C { mailbox_bound = 1 inputs { once send(A, Ping) } fairness { weak runtime.progress } }
+property "input is processed" { forall (i in inputs(A)) { i.submitted leads_to (exists (z in instances(Z)) { z.state == Some(true) }) } }
+property "unreferenced instances remain isolated" {
+  always (forall (z in instances(Z)) { (forall (a in instances(A)) { a.state != z.reference }) implies z.state == Some(false) })
+}
+check C { spawn_bound A = 1 spawn_bound Z = 2 mailbox_bound = 1 main { spawn(Z); let right = spawn(Z); let a = spawn(A, right); inputs { once send(a, Ping) } } fairness { weak runtime.progress } }
 "#;
     let p = compile(source, None).unwrap();
     let report = checker::check(source, &p, &Options::default()).unwrap();

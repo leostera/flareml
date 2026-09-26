@@ -39,7 +39,7 @@ Add a transitive `chooses` effect, alongside the existing send/inspection effect
 
 Reject direct or indirect choice in:
 
-- initializers;
+- initializers and deterministic check setup;
 - properties and specification helpers used by properties;
 - finite-domain definitions and external input payload/target expressions;
 - contexts that require pure expressions, including choice candidates.
@@ -129,7 +129,7 @@ Current trace actions identify deterministic turns. A nondeterministic turn need
 - the source location and sufficient execution context to distinguish repeated helper calls;
 - the selected candidate position, with the selected value either recorded and checked or deterministically reconstructed.
 
-A source span alone is not an encounter identifier: the same helper can run multiple times in one turn. The implemented format is **7**: every action includes `choices`, an ordered array of `{ encounter, span, calls, candidate, value }`. `encounter` and `candidate` are zero-based; `calls` is the ordered stack of helper call-expression spans. Selected values are recorded and checked against freshly evaluated candidates. Continue accepting only that current format, not a choice-enabled compatibility profile.
+A source span alone is not an encounter identifier: the same helper can run multiple times in one turn. The choice layout was introduced in format **7** and is retained in current format **8**, which adds RFD0004 allocation evidence: every action includes `choices`, an ordered array of `{ encounter, span, calls, candidate, value }`. `encounter` and `candidate` are zero-based; `calls` is the ordered stack of helper call-expression spans. Selected values are recorded and checked against freshly evaluated candidates. Continue accepting only that current format, not a choice-enabled compatibility profile.
 
 Replay must re-execute the turn with the transcript, check every candidate selection against the freshly evaluated candidate list, consume the transcript exactly, and compare the resulting state, sends, provenance, and observations. Reject missing, extra, reordered, out-of-range, or source-mismatched selections. Never validate a trace by rerunning an unconstrained choice and hoping for the same result.
 
@@ -163,7 +163,7 @@ Replay supplies a complete transcript and executes only its selected branch. It 
 
 ## Recorded validation and measurements
 
-The implemented examples are [loss](../../examples/faulty-link-loss.fml), [duplicate-application bug](../../examples/faulty-link-duplicate-bug.fml), and [idempotent repair](../../examples/faulty-link-duplicate-fixed.fml). `tests/faulty_links.rs` independently selects all eight intended obligations, checks verdicts, replays finite/lasso evidence, and corrupts persisted choice transcripts. `tests/choices.rs` compares 16 candidate-list pairs against independent Cartesian enumeration, checks dependent helper calls and outbox order, branching encounter counts, effect restrictions, Result handling, fairness, safety, cutoff preservation, and transcript tampering. Unit regressions check expansion deadline propagation/guard reset and compare replay fairness enabledness against exhaustive successor generation. Final stable validation: **147 tests passed**, formatting and strict all-target Clippy passed, and fuzz targets compile on stable.
+The implemented examples are [loss](../../examples/faulty-link-loss.fml), [duplicate-application bug](../../examples/faulty-link-duplicate-bug.fml), and [idempotent repair](../../examples/faulty-link-duplicate-fixed.fml). `tests/faulty_links.rs` independently selects all eight intended obligations, checks verdicts, replays finite/lasso evidence, and corrupts persisted choice transcripts. `tests/choices.rs` compares 16 candidate-list pairs against independent Cartesian enumeration, checks dependent helper calls and outbox order, branching encounter counts, effect restrictions, Result handling, fairness, safety, cutoff preservation, and transcript tampering. Unit regressions check expansion deadline propagation/guard reset and compare replay fairness enabledness against exhaustive successor generation. Stable validation at this milestone: **147 tests passed**, formatting and strict all-target Clippy passed, and fuzz targets compile on stable.
 
 Initial local coverage/sanitizer-instrumented campaigns on `aarch64-apple-darwin`, nightly, seed `12345`, with `-max_total_time=120 -timeout=10 -rss_limit_mb=2048` passed: **790,621 source executions** and **2,896,980 trace-JSON executions**, each in 121 seconds. Valid source and format-7 trace seeds included the faulty-link models; the trace fuzzer selects the matching source fixture by hash. These short campaigns are smoke evidence, not a coverage-completeness claim. CI seed generation was extended accordingly. Follow-up 120-second reruns were interrupted by the orchestration wall-time limit and are not counted as completed campaigns. Final instrumented smoke runs on the updated binaries completed **20,000 executions per target** (seed `67890`; source 4 seconds, trace JSON 1 second) without reported failures.
 

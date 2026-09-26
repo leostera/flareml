@@ -10,6 +10,7 @@ pub enum Ty {
     List(Box<Ty>),
     Input(String),
     Message(String),
+    Instance(String),
     Address(String),
     Temporal,
     Never,
@@ -41,12 +42,14 @@ pub struct Constructor {
 pub struct Effects {
     pub sends: bool,
     pub chooses: bool,
+    pub spawns: bool,
     pub inspects: bool,
 }
 impl Effects {
     pub fn include(&mut self, other: Self) {
         self.sends |= other.sends;
         self.chooses |= other.chooses;
+        self.spawns |= other.spawns;
         self.inspects |= other.inspects;
     }
 }
@@ -97,7 +100,16 @@ impl Program {
             effects: BTreeMap::new(),
         };
         let mut type_names: BTreeSet<String> = [
-            "Bool", "Int", "String", "unit", "Option", "Result", "Actor", "choose",
+            "Bool",
+            "Int",
+            "String",
+            "unit",
+            "Option",
+            "Result",
+            "Actor",
+            "choose",
+            "spawn",
+            "instances",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -119,7 +131,16 @@ impl Program {
             }
             for v in &d.variants {
                 if [
-                    "None", "Some", "Ok", "Err", "send", "choose", "inputs", "messages",
+                    "None",
+                    "Some",
+                    "Ok",
+                    "Err",
+                    "send",
+                    "choose",
+                    "spawn",
+                    "instances",
+                    "inputs",
+                    "messages",
                 ]
                 .contains(&v.name.as_str())
                     || p.constructors
@@ -186,34 +207,6 @@ impl Program {
                     x.span,
                 )?;
             }
-        }
-        for i in &p.check.inputs {
-            let actor = p
-                .actors
-                .get(&i.actor)
-                .ok_or_else(|| Error::new(i.span, "unknown input actor"))?;
-            match (&actor.key, &i.key) {
-                (Some((_, ty)), Some(key)) => p.require(
-                    &p.resolve(ty, key.span)?,
-                    &p.type_expr(key, &env, false, false)?,
-                    key.span,
-                )?,
-                (Some(_), None) => {
-                    return Err(Error::new(
-                        i.span,
-                        "keyed actor input requires Actor.at(key)",
-                    ));
-                }
-                (None, Some(_)) => {
-                    return Err(Error::new(i.span, "only keyed actors accept Actor.at(key)"));
-                }
-                _ => {}
-            }
-            p.require(
-                &p.resolve(p.message_type(&i.actor), i.span)?,
-                &p.type_expr(&i.value, &env, false, false)?,
-                i.span,
-            )?;
         }
         for f in p.functions.values() {
             let output = p.resolve(&f.output, f.span)?;
@@ -323,6 +316,24 @@ impl Program {
         let mut result = Ty::named("unit");
         for (index, s) in body.iter().enumerate() {
             result = match &s.kind {
+                StmtKind::Inputs(inputs) => {
+                    for input in inputs {
+                        let Ty::Address(actor) =
+                            self.type_expr(&input.target, env, false, false)?
+                        else {
+                            return Err(Error::new(
+                                input.span,
+                                "input target must be an actor reference",
+                            ));
+                        };
+                        self.require(
+                            &self.resolve(self.message_type(&actor), input.span)?,
+                            &self.type_expr(&input.value, env, false, false)?,
+                            input.span,
+                        )?;
+                    }
+                    Ty::named("unit")
+                }
                 StmtKind::Let(n, e) => {
                     let t = if let ExprKind::Call(target, args) = &e.kind
                         && target.path().as_deref() == Some("choose")
@@ -512,75 +523,6 @@ impl Program {
     ) -> Result<Ty> {
         let pure = |e: &Expr| self.type_expr(e, env, property, false);
         let boolty = Ty::named("Bool");
-        if let ExprKind::Field(_, field) = &e.kind
-            && field == "state"
-            && let Some((path, Some(key))) = actor_target(e)
-            && let Some(name) = path.strip_suffix(".state")
-            && let Some(actor) = self.actors.get(name)
-        {
-            if !property {
-                return Err(Error::new(
-                    e.span,
-                    "actor state inspection is property-only",
-                ));
-            }
-            let (_, key_ty) = actor
-                .key
-                .as_ref()
-                .ok_or_else(|| Error::new(e.span, "actor is not keyed"))?;
-            self.require(&self.resolve(key_ty, key.span)?, &pure(&key)?, key.span)?;
-            return self.resolve(
-                actor
-                    .state
-                    .as_ref()
-                    .ok_or_else(|| Error::new(e.span, "stateless actors have no state"))?,
-                e.span,
-            );
-        }
-        if let Some(actor) = e
-            .path()
-            .and_then(|path| path.strip_suffix(".state").and_then(|n| self.actors.get(n)))
-        {
-            if actor.key.is_some() {
-                return Err(Error::new(
-                    e.span,
-                    "keyed state inspection requires Actor.at(key).state",
-                ));
-            }
-            if !property {
-                return Err(Error::new(
-                    e.span,
-                    "actor state inspection is property-only; handlers use their state parameter",
-                ));
-            }
-            return self.resolve(
-                actor
-                    .state
-                    .as_ref()
-                    .ok_or_else(|| Error::new(e.span, "stateless actors have no state"))?,
-                e.span,
-            );
-        }
-        if let ExprKind::Call(target, args) = &e.kind
-            && let ExprKind::Field(actor, method) = &target.kind
-            && method == "at"
-            && let ExprKind::Name(name) = &actor.kind
-            && let Some(decl) = self.actors.get(name)
-        {
-            let (_, key_ty) = decl
-                .key
-                .as_ref()
-                .ok_or_else(|| Error::new(e.span, "only keyed actors have .at(key) addresses"))?;
-            if args.len() != 1 {
-                return Err(Error::new(e.span, "Actor.at requires exactly one key"));
-            }
-            self.require(
-                &self.resolve(key_ty, args[0].span)?,
-                &pure(&args[0])?,
-                args[0].span,
-            )?;
-            return Ok(Ty::Address(name.clone()));
-        }
         match &e.kind {
             ExprKind::Bool(_) => Ok(boolty),
             ExprKind::Int(_) => Ok(Ty::named("Int")),
@@ -589,9 +531,6 @@ impl Program {
             ExprKind::Name(n) => {
                 if let Some(t) = env.get(n) {
                     return Ok(t.clone());
-                }
-                if self.actors.get(n).is_some_and(|a| a.key.is_none()) {
-                    return Ok(Ty::Address(n.clone()));
                 }
                 if n == "None" {
                     return Ok(Ty::Option(Box::new(Ty::Never)));
@@ -639,6 +578,17 @@ impl Program {
                     "target" => Ok(Ty::Address(actor)),
                     _ => Err(Error::new(e.span, "unknown input observation field")),
                 },
+                Ty::Instance(actor) => match n.as_str() {
+                    "created" => Ok(boolty),
+                    "reference" => Ok(Ty::Option(Box::new(Ty::Address(actor)))),
+                    "state" => {
+                        let ty = self.actors[&actor].state.as_ref().ok_or_else(|| {
+                            Error::new(e.span, "stateless instances have no state field")
+                        })?;
+                        Ok(Ty::Option(Box::new(self.resolve(ty, e.span)?)))
+                    }
+                    _ => Err(Error::new(e.span, "unknown instance observation field")),
+                },
                 Ty::Message(actor) => match n.as_str() {
                     "sent" | "processed" | "external" => Ok(boolty),
                     "payload" => Ok(Ty::Option(Box::new(
@@ -666,12 +616,12 @@ impl Program {
                 let path = f.path().unwrap_or_default();
                 if let Some(function) = self.functions.get(&path) {
                     let fx = self.effects[&path];
-                    if ((fx.sends || fx.chooses) && (property || !effect))
+                    if ((fx.sends || fx.chooses || fx.spawns) && (property || !effect))
                         || (fx.inspects && !property)
                     {
                         return Err(Error::new(
                             e.span,
-                            "function effects are not allowed here (send/choice helpers must be direct statements/bindings; inspectors are specification-only)",
+                            "function effects are not allowed here (send/choice/spawn helpers must be direct statements/bindings; inspectors are specification-only)",
                         ));
                     }
                     if function.params.len() != args.len() {
@@ -681,6 +631,40 @@ impl Program {
                         self.require(&self.resolve(ty, arg.span)?, &pure(arg)?, arg.span)?;
                     }
                     return self.resolve(&function.output, e.span);
+                }
+                if path == "spawn" {
+                    let Some(Expr {
+                        kind: ExprKind::Name(name),
+                        ..
+                    }) = args.first()
+                    else {
+                        return Err(Error::new(e.span, "spawn requires an actor definition"));
+                    };
+                    let actor = self
+                        .actors
+                        .get(name)
+                        .ok_or_else(|| Error::new(e.span, "unknown actor definition"))?;
+                    if property || !effect {
+                        return Err(Error::new(
+                            e.span,
+                            "spawn must be a direct main/handler statement or binding",
+                        ));
+                    }
+                    let params = actor
+                        .initializer
+                        .as_ref()
+                        .map(|n| self.functions[n].params.as_slice())
+                        .unwrap_or_default();
+                    if args.len() != params.len() + 1 {
+                        return Err(Error::new(
+                            e.span,
+                            "spawn initializer argument count mismatch",
+                        ));
+                    }
+                    for ((_, ty), arg) in params.iter().zip(&args[1..]) {
+                        self.require(&self.resolve(ty, arg.span)?, &pure(arg)?, arg.span)?;
+                    }
+                    return Ok(Ty::Address(name.clone()));
                 }
                 if path == "choose" {
                     return Err(Error::new(
@@ -708,6 +692,21 @@ impl Program {
                     )?;
                     return Ok(Ty::named("unit"));
                 }
+                if path == "instances" {
+                    if !property || args.len() != 1 {
+                        return Err(Error::new(
+                            e.span,
+                            "instances is a specification-only view of one actor definition",
+                        ));
+                    }
+                    let actor = args[0]
+                        .path()
+                        .filter(|a| self.actors.contains_key(a))
+                        .ok_or_else(|| {
+                            Error::new(e.span, "instances requires an actor definition")
+                        })?;
+                    return Ok(Ty::List(Box::new(Ty::Instance(actor))));
+                }
                 if path == "inputs" || path == "messages" {
                     if !property || args.len() != 1 {
                         return Err(Error::new(
@@ -715,7 +714,15 @@ impl Program {
                             "inputs/messages is a specification-only view of one actor declaration",
                         ));
                     }
-                    let actor = args[0].path().filter(|n| self.actors.contains_key(n)).ok_or_else(|| Error::new(e.span, "inputs/messages requires an actor declaration, not a keyed address"))?;
+                    let actor = args[0]
+                        .path()
+                        .filter(|n| self.actors.contains_key(n))
+                        .ok_or_else(|| {
+                            Error::new(
+                                e.span,
+                                "inputs/messages requires an actor definition, not a reference",
+                            )
+                        })?;
                     if path == "messages" && self.check.message_bound.is_none() {
                         return Err(Error::new(
                             e.span,
@@ -872,11 +879,11 @@ pub fn validate_temporal(e: &Expr) -> Result<()> {
             ..
         } => {
             let stable = matches!(domain.kind, Name(_))
-                || matches!(&domain.kind, Call(f, _) if matches!(f.path().as_deref(), Some("inputs" | "messages")));
+                || matches!(&domain.kind, Call(f, _) if matches!(f.path().as_deref(), Some("inputs" | "messages" | "instances")));
             if !stable {
                 return Err(Error::new(
                     domain.span,
-                    "temporal quantification requires a stable type domain or inputs/messages view",
+                    "temporal quantification requires a stable type domain or inputs/messages/instances view",
                 ));
             }
             validate_temporal(body)?;

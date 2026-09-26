@@ -1,25 +1,23 @@
 // Two clients perform read-modify-write against a storage service.
 // Every service turn is atomic; the multi-message transaction is not.
 // This is an abstract storage protocol, not a D1 adapter.
-type ClientId = Alice | Bob
 type Phase = Idle | Reading | Writing | Done
-type ClientState = ClientState { me: Actor<Client>, phase: Phase }
-type ClientMessage = Start | ReadValue(Int) | Ack
+type ClientState = ClientState { store: Actor<Store>, phase: Phase }
+type ClientMessage = Start(Actor<Client>) | ReadValue(Int, Actor<Client>) | Ack
 type StoreMessage = Read(Actor<Client>) | Write(Actor<Client>, Int)
-
-actor Client(id: ClientId) {
-  init(id: ClientId): ClientState { ClientState { me: Client.at(id), phase: Idle } }
+actor Client {
+  init(store: Actor<Store>): ClientState { ClientState { store: store, phase: Idle } }
   handle_message(state: ClientState, message: ClientMessage): ClientState {
     match message {
-      | Start -> {
-          send(Store, Read(state.me));
-          ClientState { me: state.me, phase: Reading }
+      | Start(reply_to) -> {
+          send(state.store, Read(reply_to));
+          ClientState { store: state.store, phase: Reading }
         }
-      | ReadValue(value) -> {
-          send(Store, Write(state.me, value + 1));
-          ClientState { me: state.me, phase: Writing }
+      | ReadValue(value, reply_to) -> {
+          send(state.store, Write(reply_to, value + 1));
+          ClientState { store: state.store, phase: Writing }
         }
-      | Ack -> ClientState { me: state.me, phase: Done }
+      | Ack -> ClientState { store: state.store, phase: Done }
     }
   }
 }
@@ -27,23 +25,33 @@ actor Store {
   init(): Int { 0 }
   handle_message(state: Int, message: StoreMessage): Int {
     match message {
-      | Read(reply_to) -> { send(reply_to, ReadValue(state)); state }
+      | Read(reply_to) -> { send(reply_to, ReadValue(state, reply_to)); state }
       | Write(reply_to, value) -> { send(reply_to, Ack); value }
     }
   }
 }
+let finished = (candidate: Option<ClientState>): Bool {
+  match candidate { | None -> false | Some(state) -> state.phase == Done }
+}
 property "two completed increments retain both updates" {
-  always ((Client.at(Alice).state.phase == Done && Client.at(Bob).state.phase == Done) implies Store.state == 2)
+  always ((forall (client in instances(Client)) { finished(client.state) }) implies
+    (forall (store in instances(Store)) { store.state == Some(2) }))
 }
 property "submitted clients finish" {
-  forall (id in ClientId) {
-    (exists (i in inputs(Client)) { i.target == Client.at(id) && i.submitted })
-      leads_to Client.at(id).state.phase == Done
+  forall (i in inputs(Client)) {
+    i.submitted leads_to (exists (client in instances(Client)) { client.reference == Some(i.target) && finished(client.state) })
   }
 }
 check LostUpdate {
   domain Int = 0..2
+  spawn_bound Store = 1
+  spawn_bound Client = 2
   mailbox_bound = 2
-  inputs { once send(Client.at(Alice), Start) once send(Client.at(Bob), Start) }
+  main {
+    let store = spawn(Store);
+    let alice = spawn(Client, store);
+    let bob = spawn(Client, store);
+    inputs { once send(alice, Start(alice)) once send(bob, Start(bob)) }
+  }
   fairness { weak runtime.progress }
 }

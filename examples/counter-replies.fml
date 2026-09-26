@@ -1,15 +1,13 @@
 // A counter commits an increment and explicitly sends a correlated reply.
 // The client cannot process the reply before that commit.
 // Finite, fault-free mailboxes model a protocol, not a deployment runtime or durability.
-type CounterId = Main
-type ClientId = User
 type RequestId = First
 type CounterMessage = Inc(Actor<Client>, RequestId)
 type ClientMessage = Counted(RequestId, Int)
 type ClientState = Waiting | Observed
 
-actor Counter(id: CounterId) {
-  init(id: CounterId): Int { 0 }
+actor Counter {
+  init(): Int { 0 }
   handle_message(state: Int, message: CounterMessage): Int {
     match message {
       | Inc(reply_to, request_id) -> {
@@ -21,8 +19,8 @@ actor Counter(id: CounterId) {
   }
 }
 
-actor Client(id: ClientId) {
-  init(id: ClientId): ClientState { Waiting }
+actor Client {
+  init(): ClientState { Waiting }
   handle_message(state: ClientState, message: ClientMessage): ClientState {
     match message {
       | Counted(_, _) -> Observed
@@ -31,13 +29,14 @@ actor Client(id: ClientId) {
 }
 
 property "reply cannot be processed before the counter commits" {
-  always (Client.at(User).state == Observed implies Counter.at(Main).state == 1)
+  always ((exists (client in instances(Client)) { client.state == Some(Observed) }) implies
+    (forall (counter in instances(Counter)) { counter.state == Some(1) }))
 }
-property "client receives reply" { reachable (Client.at(User).state == Observed) }
+property "client receives reply" { reachable (exists (client in instances(Client)) { client.state == Some(Observed) }) }
 
 property "submitted increments eventually receive a reply" {
   forall (i in inputs(Counter)) {
-    i.submitted leads_to Client.at(User).state == Observed
+    i.submitted leads_to (exists (client in instances(Client)) { client.state == Some(Observed) })
   }
 }
 
@@ -55,6 +54,12 @@ check OneIncrement {
   domain Int = 0..1
   mailbox_bound = 2
   message_bound = 2
-  inputs { once send(Counter.at(Main), Inc(Client.at(User), First)) }
+  spawn_bound Counter = 1
+  spawn_bound Client = 1
+  main {
+    let counter = spawn(Counter);
+    let client = spawn(Client);
+    inputs { once send(counter, Inc(client, First)) }
+  }
   fairness { weak runtime.progress }
 }

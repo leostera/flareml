@@ -1,139 +1,164 @@
-# RFD0004 — Bounded dynamic actor spawning
+# RFD0004 — Explicit populations and bounded actor spawning
 
-**Status:** design sketch; not implemented. Requires completion and validation of [RFD0003 (choice)](RFD0003-nondeterministic-choice-and-faulty-links.md). Refine this sketch before implementation.
+**Status:** implemented; stabilization and independent validation ongoing. Builds on [RFD0003 (choice)](RFD0003-nondeterministic-choice-and-faulty-links.md) and the [current RFD0002 contract](RFD0002-functions-and-actors.md). Finite testing is not a proof of correctness.
 
-**Next:** [RFD0005 (suspension and reentrancy)](RFD0005-suspension-and-reentrancy.md) is a separate milestone, not part of spawn.
+**Next:** [RFD0005 (suspension and reentrancy)](RFD0005-suspension-and-reentrancy.md) remains an unimplemented sketch. Setup and spawn do not introduce either feature.
 
-## Motivation
+## Decision: definitions never create instances
 
-A coordinator should be able to receive work, create a participant to perform it, and send that participant a message. Unlike current keyed actors, the participant does not exist at initialization: its existence and identity become part of reachable execution state.
+An `actor` declaration defines a participant type. A selected check's deterministic `main` explicitly constructs its initial population. The same `spawn` operation creates later instances during handlers. There is no `spawnable` modifier, implicit singleton, eagerly populated key domain, global reference named after a definition, or `.at(key)` constructor.
 
-This is dynamic creation in a finite experiment, not an unbounded runtime or an operating-system process launch. Actors remain concurrent participants and, for this milestone, each whole handler remains one non-reentrant atomic turn.
+This is finite systems modeling, not an operating-system process launcher. Every handler remains one atomic, non-reentrant turn.
 
-## Proposed direction
-
-Illustrative handler syntax, not executable today:
-
-```text
-let worker = spawn(Worker);
-send(worker, job);
+```fml
+actor Coordinator {
+  handle_message(message: unit): unit {
+    let worker = spawn(Worker, false);
+    send(worker, ());
+  }
+}
+actor Worker {
+  init(completed: Bool): Bool { completed }
+  handle_message(state: Bool, message: unit): Bool { true }
+}
+property "two workers can be created" {
+  reachable (forall (worker in instances(Worker)) { worker.created })
+}
+property "future workers finish" {
+  forall (worker in instances(Worker)) {
+    worker.created leads_to worker.state == Some(true)
+  }
+}
+check TwoWorkers {
+  spawn_bound Coordinator = 1
+  spawn_bound Worker = 2
+  mailbox_bound = 2
+  main {
+    let coordinator = spawn(Coordinator);
+    inputs { once send(coordinator, ()) once send(coordinator, ()) }
+  }
+  fairness { weak runtime.progress }
+}
 ```
 
-`worker` is an `Actor<Worker>` reference. Each successful spawn produces a fresh identity with independent owned state and mailbox. References can be retained and transferred through messages under existing typing rules.
+## Deterministic setup
 
-The sketch proposes:
+Every check requires exactly one `main { ... }` block. `main {}` is valid and creates nothing. Only the selected check's setup executes, once, before exploration or property observation. Its result is discarded; ordinary semicolon, lexical scope, and Result-handling rules still apply.
 
-- a finite lifetime creation pool per spawnable actor definition, configured by the check;
-- no termination, deallocation, or identity reuse in the first implementation;
-- deterministic fresh-slot allocation within each branch, rather than arbitrary selection of an unused slot;
-- pure initialization and atomic publication with the creating turn;
-- transitive allocation effects, disallowed in properties and initializers;
-- no implicit fairness of optional requests to create actors.
+Setup uses the shared statement interpreter. It may call pure helpers, spawn, and send, including through effectful helpers. Direct and transitive `choose` and specification inspection are rejected. No actor processes a message until the whole setup succeeds.
 
-A deterministic allocator defines identity-generation behavior; it is not a symmetry reduction. Allocation order must remain in state equality and replay. Do not expose incidental host pointers or random UUIDs as model identities.
+- `let main = spawn(MainActor); send(main, Start);` creates an instance and enqueues startup work explicitly.
+- `main { spawn(MainActor) }` also works: the unused reference is discarded, but the instance remains allocated. There is no implicit startup message.
+- Setup bindings remain local. They are not global names accessible to handlers or properties. Pass references through initializer arguments and protocol messages; observe populations through `instances(Type)`.
+- Conditional setup based on deterministic local values is allowed. Branch-local bindings do not escape.
+- Failed allocation, initialization, value checking, or enqueueing exposes **no partial initial state**. Capacity/domain/work exhaustion is inconclusive, not verification, a modeled rejection, or a zero-step witness from partially completed setup.
 
-## Definitions versus instances: resolve before implementation
+### Optional external input registration
 
-Today `actor Worker { ... }` means both a definition and an eagerly created singleton. A keyed declaration similarly creates its full population. Blindly adding `spawn(Worker)` would leave an unexplained implicit singleton alongside dynamic instances.
+An `inputs { once send(reference, payload) ... }` statement is allowed only inside setup, including setup match arms. Targets and payloads are pure expressions evaluated once in the current local environment. Their values and source spans are captured as immutable external slots. Each target must be an instance created by the completed setup.
 
-Design an explicit distinction between a spawnable definition and existing static populations. Decisions required:
+Registration does not enqueue anything. After setup, each slot may be submitted **at most once**, with no fairness requirement to submit. Captured references can also occur in payloads, including a participant's own reference. Repeated equal payloads still create distinct slots. An intermediate inputs block requires a trailing semicolon, like any other intermediate statement.
 
-1. Does a spawnable definition use a declaration marker, or does the check define which declarations have initial instances?
-2. Are singleton/keyed forms preserved as clear static-population shorthand, or replaced by explicit initial instance declarations?
-3. What exactly does a bare `Worker` expression mean for a spawn-only definition? It must not silently select an arbitrary live instance.
-4. How is initialization supplied: no arguments initially, or finite typed arguments to `spawn`? Are self references available to initializers or handlers?
-5. How do actor reference types distinguish definitions without confusing them with allocated values?
+In contrast, an ordinary setup `send` is already enqueued in the initial state. With message history enabled it has a normal lifetime observation and `external == false`; only subsequent optional input submissions are external. Setup is not a scheduler transition or fairness action. Later-created actors receive work through modeled sends, not newly registered external input slots.
 
-Do not choose a source spelling for these merely to preserve existing parser structure. There are no legacy-language compatibility requirements, but any replacement must migrate existing examples and keep one coherent execution contract. This RFD does not depend on top-level constants or imports being implemented first.
+## Allocation expressions, initialization, and references
 
-## Atomic allocation and visibility
+`spawn(Type, args...)` returns a fresh `Actor<Type>`. It must be a direct statement or the whole initializer of a local binding in setup, a handler, or an effectful helper. A discarded direct spawn is valid. The first operand is a definition name, not a reference; remaining operands are pure expressions matching the initializer's typed parameters.
 
-Proposed commit semantics:
+Allocation effects are inferred transitively. Reject direct or indirect allocation in initializers, properties, finite domains, optional-input expressions, choice candidates, and other pure contexts. Calls to allocating helpers follow the same placement rules. No property inspector may also send, choose, or spawn.
 
-1. Begin with the actor registry, allocation counters, state, and mailboxes of the pre-turn state.
-2. Reserve fresh slots locally in source order as `spawn` executes. Different choice branches have independent reservations.
-3. Initialize each proposed instance deterministically using permitted finite values. Initializers cannot send, spawn, choose, or inspect other actors' state.
-4. Permit later statements in that same turn to retain the new reference and stage sends to it.
-5. At successful commit, install the new instances and mailboxes, apply sender state, and publish the complete outbox and observations atomically.
+An initializer is pure and returns the owned state. It may use typed arguments, including references already obtained by the creator, but cannot send, choose, spawn, or inspect state/observations. Its parameter list need not be an identity domain: `spawn(Worker, false)` simply passes a Boolean value. A definition without `init` is stateless and accepts no initializer arguments.
 
-A new actor cannot run before the creator commits. No other participant can observe a reserved-but-uncommitted identity. If initialization, allocation, or any staged send exceeds a bound, no part of the creating transition is published. Retry of an uncommitted branch must not consume identity slots globally.
+There is no automatic self binding, reference fabrication, asynchronous initialization, or implicit startup. To create a self-sending participant, bind its new reference and send it an explicit message containing that reference. A new binding is not visible while its own initializer is evaluated. State retained between turns is not durability.
 
-Clarify stateless spawnable actors, initial state arguments, self-sends, and helper calls as part of the refined design. Do not add suspended initialization or implicit startup messages in this milestone.
+## Finite identity pools
 
-## Finite bounds are not application behavior
+Every selected check declares `spawn_bound Type = N` for **every actor definition**, including unused definitions. N is an integer literal in **0..4096**. Repeated bounds, unknown definitions, and other values are invalid.
 
-The check declares finite creation capacity. Resolve the concrete spelling, whether zero is accepted, and how static instances contribute to total address limits before implementation.
+- Setup and handler creation consume the same lifetime pool.
+- Slots are allocated monotonically from zero, independently per definition. Setup order and later interleavings determine allocation order, not random selection.
+- Identities are opaque typed routing references, not model integers. They need no `Int` domain and support no application arithmetic index.
+- There is no termination, deallocation, or identity reuse. Completed and unreferenced instances still consume capacity.
+- All created instances share the 4096-address host guard. Potential unborn slots have no mailbox.
+- Pool/host exhaustion is inconclusive unless a valid violation was already established. It never silently blocks creation, returns `None`, reuses a worker, or prunes a branch to prove verification.
+- Application admission policies must be explicit model behavior, separate from checker bounds.
 
-Required semantics:
+Zero is intentional: no instance may be created. A universal property over zero slots can be vacuous; a reachable universal predicate over an empty population is not evidence of creation. A deterministic allocator is not symmetry reduction or a theorem about larger populations.
 
-- Pool exhaustion or total host-address exhaustion makes exploration incomplete/inconclusive, unless a valid violation is already established.
-- Do not return an implicit `None`, silently disable the spawning turn, or wrap/reuse an identity to close the graph.
-- The pool is a lifetime creation bound, not merely a concurrent-live-actor limit, since this version has no destruction.
-- An application policy such as “reject the eleventh job” must be ordinary model logic. The exploration guard must not masquerade as that rejection policy.
-- Raising a bound allows additional executions; verification at one finite scope is not a proof for all population sizes.
+## Atomic reservation and publication
 
-A coordinator that limits its own creation requests can have a complete finite graph. A coordinator that keeps spawning forever will hit any finite lifetime pool; a cutoff is the honest outcome.
+For setup, start with an empty registry. For each local execution of a handler, start with the pre-turn registry and fresh branch-local reservations:
 
-## Identity, state equality, and fairness
+1. Derive the next slot from committed vector length plus this execution's earlier reservations for that definition. Check both capacities.
+2. Evaluate pure initializer arguments and initialization; validate finite values. Retain the address, arguments, source/call context, and initial state locally. Stateless instances retain an internal unit value.
+3. Subsequent statements can retain or transfer the reference and stage sends to it.
+4. Only after successful execution, install every new registry entry and mailbox and append sends in source order. A handler also commits its next state, dequeues its head, and marks completion in that same transition.
 
-Include allocation state and live instances in exact state equality. Two states that currently have identical application fields but different remaining identity pools are not equivalent.
+No participant sees partial setup or partial handler publication. A new instance cannot process a staged message before commit. Failure in any initializer, value check, allocation, or enqueue abandons the proposed publication; earlier committed turns remain intact. Choice prefix re-execution resets reservations and cannot consume global slots. Any generated branch cutoff conservatively makes exploration incomplete; previously discovered genuine evidence remains valid.
 
-FIFO remains per address, and weak mailbox fairness attaches to the allocated typed identity. An unborn instance has no enabled processing action. After commit, its mailbox follows the same scheduling contract as existing instances. Fresh allocation must not recycle an old fairness identity.
+The shared local evaluation and elaboration guards apply. Setup and handler execution, allocation, input capture, and publication poll the check deadline; timeouts are cooperative. No separate suspended-allocation interpreter is introduced.
 
-`message_bound` currently means lifetime observations per actor declaration across all keys. The natural extension is across all static and dynamic instances of the definition, without per-spawn reset; finalize and document this alongside the identity representation.
+## Registry, observations, and fairness
 
-## Properties over changing populations
+Exact state equality includes `spawned`, a vector of committed current values per definition. Vector length is the next identity, without a separate counter that could drift. It also includes per-address mailboxes and captured external slots and their flags. There is only one population representation, not static/keyed/dynamic registries.
 
-A changing live-actor list must not be treated as a stable temporal quantifier domain. Otherwise a clause expanded at initialization could permanently omit every future worker.
+`instances(Type)` is specification-only and ranges over all N stable potential slots, from the initial state onward:
 
-Proposed direction: expose a finite, stable observation domain of potential instance slots, analogous to message slots. A slot indicates whether it has been created and carries an optional typed reference once allocated. Allocation is monotone for this version.
+| Field | Type | Before creation | After creation |
+| --- | --- | --- | --- |
+| `created` | `Bool` | false | true |
+| `reference` | `Option<Actor<Type>>` | None | Some(reference) |
+| `state` | `Option<StateType>` | None | Some(current state) |
 
-The refined design must specify:
+Stateless definitions have no `state` field. Reference identity and creation are monotone; state may change. Match the optional state in a pure helper to inspect record fields. General state lookup through routing references is not introduced.
 
-- observation syntax and whether the view includes static instances;
-- safe observation of owned state before creation, without inventing a default state;
-- whether references allow read-only specification state lookup, since current state access is tied to static names/keyed targets;
-- temporal binding stability and how a later-created actor can be mentioned from initialization;
-- semantics for external input targets: the first version should keep declared input slots targeted at initially existing actors, with coordinators forwarding work to spawned actors.
+Stable temporal quantification includes unborn slots. `worker.created leads_to worker.state == Some(true)` therefore covers future workers rather than only the population present at expansion. Enumeration of data domains containing `Actor<Type>` is unsupported and errors explicitly; it must not manufacture references to unborn slots.
 
-Properties should be able to express “every worker that receives a job eventually finishes” without either dereferencing nonexistent state or vacuously ignoring workers created later. Unsupported forms must be rejected, not silently approximated.
+`inputs(Type)` includes all slots captured during setup for that definition, possibly none. `messages(Type)` uses `message_bound` lifetime slots across **all instances**, including setup sends; slots never recycle. `mailbox_bound` bounds pending messages per actual address.
+
+FIFO and weak fairness attach to each created address. An unborn slot has no mailbox or enabled action. Processing any choice outcome services the same mailbox action. Fairness does not force optional submissions, creation, or favorable choices.
 
 ## Evidence and replay
 
-A spawn-capable trace must record or unambiguously reconstruct allocations, their order, initialization arguments, typed identities, and resulting registry/mailboxes. Extend and version the trace schema rather than overloading source descriptions with unchecked text.
+Trace format is **8**, current-only. The first snapshot is the completed deterministic setup, including captured inputs, initial allocations, mailboxes, and message observations. Replay reruns `main` from an empty state and compares this entire snapshot before executing recorded actions. Setup is not fabricated as a fair processing action and has no choice transcript.
 
-Replay must check freshness, pool membership, allocation order, initialization, all references, and atomic publication. Reject future references, reused identities, missing instances, changed bounds, and fabricated allocation counters. Choice transcripts from RFD0003 and allocation evidence must compose within one turn.
+Traces include the selected `spawn_bounds`. Each handler action has an ordered `spawns` array containing `address`, allocating `span`, helper `calls`, pure initializer `arguments`, and `initial` state (unit when stateless). Replay constrains choices, re-executes initialization/allocation, and compares complete action metadata and successor state. Recorded addresses or initial values never drive the allocator.
 
-Source snapshots and run reports must include enough configuration to reproduce the finite population scope. The artifact version is not a runtime-semantics selector.
+Reject changed setup slots/payloads/targets, bounds, identities, order, arguments, initialization, allocation records, registry/mailbox entries, and source/call context. Semantically valid alternative traces are not inherently corruption; validation is not cryptographic authentication. Source snapshots and all available witnesses are saved in run bundles. Text replay shows initial populations, handler allocations, and state changes. Older artifacts must be regenerated.
 
-## Example milestone
+## Validation
 
-Build a bounded coordinator/worker model:
+- All checked-in examples now use explicit setup and transferred references. Bug/repair verdicts and finite/lasso replay are exercised by `tests/examples.rs` and per-property tests.
+- [Explicit startup](../../examples/explicit-startup.fml): setup-created actor and guaranteed initial enqueue, with no optional startup submission or implicit event.
+- `tests/setup.rs`: empty populations, discarded spawn, captured optional inputs, guaranteed initial sends, deterministic/local setup, selected-check isolation, shared lifetime bounds, deadline/capacity failure, persisted inconclusive reports, old-syntax rejection, and initial-snapshot corruption.
+- `tests/setup_oracle.rs`: 155 combinations of initial population size, Boolean initializer arguments, and creation bounds; independently expected registry values, reference identities, FIFO contents, captured inputs, observation provenance, and capacity failures.
+- `tests/spawn_oracle.rs`: independent every-edge allocation/scheduler comparison for two coordinators, worker bounds 0..3, and both fairness settings, including lifetime exhaustion after completed work.
+- `tests/spawning.rs`: fresh atomic publication, independent pools, choice/helper isolation, future-instance temporal claims, rollback, stateful/stateless workers, reference transfer/self-send, effect rejection, and shared setup/runtime host capacity.
+- `tests/spawn_replay.rs`: altered allocation arguments/records, registry, bounds, choices, and CLI-persisted evidence.
+- Independent mailbox, 729-table state-machine, graph/temporal, 160-case Boolean orbit, and Cartesian choice oracles are retained and migrated, not replaced by the implementation under test.
 
-- Initially only the coordinator and any explicit static participants exist.
-- Each accepted job creates a fresh worker and sends work to it.
-- Workers send explicit completion messages carrying correlation identifiers.
-- Safety checks distinct allocations, correct routing, and no completion for the wrong job.
-- Reachability demonstrates at least two created workers receiving work and completing.
-- With weak progress and finite fault-free work, accepted jobs complete; optional external submissions remain optional.
-- An undersized creation pool yields inconclusive, not verified rejection or apparent deadlock.
+### Recorded validation and finite scopes
 
-Combine choice and spawn in a small regression, not by expanding this into supervision, cancellation, or a general task framework.
+Current explicit-population revision: **174 tests passed** on stable, including all 17 examples and the executable README/RFD walkthroughs. Formatting, strict all-target Clippy, stable fuzz compilation, and diff whitespace checks passed.
 
-## Acceptance sketch
+Final local coverage/sanitizer smoke campaigns on `aarch64-apple-darwin`, nightly, seed `24680`, used `-runs=100000 -max_total_time=45 -timeout=10 -rss_limit_mb=2048`. Both reached the run cap successfully: **100,000 source executions in 9 seconds**, **100,000 trace-JSON executions in 3 seconds**, with no reported failures. Current source and format-8 witness seeds include explicit startup, correlated workers, choice/spawn, and faulty links. These are short smoke campaigns, not coverage-completeness evidence or independent review.
 
-- [ ] Resolve declaration/instance syntax, initialization/self-reference rules, pool accounting, and observation syntax.
-- [ ] Define the complete transition relation before modifying allocation code.
-- [ ] Type/effect-check direct and transitive spawn, including prohibited initializer/property uses.
-- [ ] Implement branch-local allocation and rollback with source-ordered sends to newly created actors.
-- [ ] Preserve registry/counter state in interning, fairness, and stable property observations.
-- [ ] Version and validate allocation evidence during replay.
-- [ ] Independently enumerate tiny allocation/request workloads and compare every reachable transition.
-- [ ] Test two spawns in one turn, interleaved coordinators, choice branches, pool exhaustion, initializer failure, and mailbox overflow after allocation.
-- [ ] Test properties concerning instances created only after initialization; reject unsupported unstable quantification.
-- [ ] Add coordinator/worker examples, per-property expected verdicts, artifact and corruption tests, and fuzz seeds.
-- [ ] Record performance/cutoff behavior as pools grow; retain honest finite-scope claims.
+Updated measurements use the current explicit setup, default graph budgets, and the debug CLI. Times include CLI/artifact overhead and are single observations, not performance guarantees:
+
+| Model | States | Edges | Outcome |
+| --- | ---: | ---: | --- |
+| Explicit startup | 2 | 3 | Verified in scope, complete |
+| Correlated two-job example | 39 | 91 | Verified in scope, complete |
+| Choice-and-spawn example | 8 | 16 | Verified in scope, complete |
+| 1 independent coordinator | 4 | 7 | Verified, 16 ms |
+| 2 independent coordinators | 16 | 40 | Verified, 7 ms |
+| 3 independent coordinators | 64 | 208 | Verified, 12 ms |
+| 4 independent coordinators | 256 | 1024 | Verified, 43 ms |
+| 5 independent coordinators | 1024 | 4864 | Verified, 198 ms |
+| 6 independent coordinators | 4096 | 22528 | Verified, 1015 ms |
+
+The synthetic setup explicitly spawns N instances of one stateless coordinator definition and captures one optional unit input per instance. Each invocation creates one Boolean worker initialized false and sends it unit work; processing makes its state true. Both lifetime pools are N, mailbox capacity is 1, no lifetime message history is selected, and weak progress is declared. Requirements are `always true` and future-worker completion. The rapid growth is evidence of finite exploration cost, not a practical scalability claim.
 
 ## Deferred
 
-Termination, identity reuse, supervision, process migration, restart/durability, unbounded creation, shared-memory capabilities, suspension, and reentrant request processing. None is implied by the word `spawn`.
+Automatic self bindings, termination, identity reuse, supervision, migration, restart/durability, unbounded creation, shared-memory capabilities, suspension, reentrancy, and nondeterministic setup. None is implied by explicit population construction.

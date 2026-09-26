@@ -1,0 +1,35 @@
+// Prefix re-execution must not consume slots globally: each choice branch
+// creates its own first worker, and only Two creates a second worker.
+type Quantity = One | Two
+actor Coordinator {
+  handle_message(message: unit): unit {
+    let first = spawn(Worker);
+    let quantity = choose([One, Two]);
+    send(first, ());
+    match quantity {
+      | One -> ()
+      | Two -> {
+          let second = spawn(Worker);
+          send(second, ());
+        }
+    }
+  }
+}
+actor Worker {
+  init(): Bool { false }
+  handle_message(state: Bool, message: unit): Bool { true }
+}
+property "both workers can be created" { reachable (forall (worker in instances(Worker)) { worker.created }) }
+property "created workers finish" {
+  forall (worker in instances(Worker)) { worker.created leads_to worker.state == Some(true) }
+}
+check ChoiceAndSpawn {
+  spawn_bound Coordinator = 1
+  spawn_bound Worker = 2
+  mailbox_bound = 1
+  main {
+    let coordinator = spawn(Coordinator);
+    inputs { once send(coordinator, ()) }
+  }
+  fairness { weak runtime.progress }
+}

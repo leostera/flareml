@@ -1,9 +1,8 @@
 // Transferable addresses route messages without exposing owned account state.
-type AccountId = Alice | Bob
 type AccountMessage = Deposit(Int)
 type Route = Route { target: Actor<Account>, amount: Int }
-actor Account(id: AccountId) {
-  init(id: AccountId): Int { 0 }
+actor Account {
+  init(): Int { 0 }
   handle_message(state: Int, message: AccountMessage): Int {
     match message { | Deposit(amount) -> state + amount }
   }
@@ -11,16 +10,26 @@ actor Account(id: AccountId) {
 actor Router {
   handle_message(message: Route): unit { send(message.target, Deposit(message.amount)) }
 }
-property "accounts are isolated" { always (Account.at(Alice).state <= 1 && Account.at(Bob).state <= 1) }
-property "both deposits can finish" { reachable (Account.at(Alice).state == 1 && Account.at(Bob).state == 1) }
+let isolated = (candidate: Option<Int>): Bool {
+  match candidate { | None -> true | Some(balance) -> balance <= 1 }
+}
+property "accounts are isolated" { always (forall (account in instances(Account)) { isolated(account.state) }) }
+property "both deposits can finish" { reachable (forall (account in instances(Account)) { account.state == Some(1) }) }
 property "generated deposits finish" { forall (m in messages(Account)) { m.sent leads_to m.processed } }
 check Deposits {
   domain Int = 0..2
   mailbox_bound = 2
   message_bound = 2
-  inputs {
-    once send(Router, Route { target: Account.at(Alice), amount: 1 })
-    once send(Router, Route { target: Account.at(Bob), amount: 1 })
+  spawn_bound Account = 2
+  spawn_bound Router = 1
+  main {
+    let router = spawn(Router);
+    let alice = spawn(Account);
+    let bob = spawn(Account);
+    inputs {
+      once send(router, Route { target: alice, amount: 1 })
+      once send(router, Route { target: bob, amount: 1 })
+    }
   }
   fairness { weak runtime.progress }
 }

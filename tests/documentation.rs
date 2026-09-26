@@ -11,6 +11,10 @@ fn documented_language_walkthroughs_compile_check_and_replay() {
             "RFD0002",
             include_str!("../docs/rfds/RFD0002-functions-and-actors.md"),
         ),
+        (
+            "RFD0004",
+            include_str!("../docs/rfds/RFD0004-bounded-spawn.md"),
+        ),
     ] {
         let source = markdown
             .split("```fml\n")

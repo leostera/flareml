@@ -4,22 +4,23 @@ All examples use the same current language and FIFO/atomic-turn execution contra
 
 | Example | Question | Expected result |
 | --- | --- | --- |
+| [explicit-startup.fml](explicit-startup.fml) | Does explicit setup enqueue startup work before exploration? | Verified; completion reachable |
 | [sequential-workflow.fml](sequential-workflow.fml) | Does a single participant progress through observable preparation/commit steps? | Verified; intermediate states reachable |
 | [eligibility-check.fml](eligibility-check.fml) | Can a pure policy deny an ineligible request? | Verified |
 | [counter-replies.fml](counter-replies.fml) | Are replies processed after commit, and does generated work progress fairly? | Verified; reply reachable |
 | [missing-reply.fml](missing-reply.fml) | Does returning state implicitly send a reply? | Violated: fair missing-reply lasso |
-| [routed-deposits.fml](routed-deposits.fml) | Do transferable addresses route deposits to isolated keyed accounts? | Verified; both deposits reachable |
+| [routed-deposits.fml](routed-deposits.fml) | Do transferable addresses route deposits to explicitly created, isolated accounts? | Verified; both deposits reachable |
 | [lost-update.fml](lost-update.fml) | Can two read-modify-write clients lose an update across protocol turns? | Violated: both clients finish but storage contains one increment |
 | [atomic-increments.fml](atomic-increments.fml) | Does making increment a single storage turn repair the lost update? | Verified; both acknowledgments reachable |
-
 | [inventory-reservation-bug.fml](inventory-reservation-bug.fml) | Can two buyers both receive the last item after separate availability checks? | Violated: both accepted |
 | [inventory-reservation-fixed.fml](inventory-reservation-fixed.fml) | Does reserving stock when making the offer prevent overselling? | Verified; both buyers can finish |
 | [payment-idempotency-bug.fml](payment-idempotency-bug.fml) | Can duplicate deliveries charge the same payment key twice? | Violated: duplicate charge |
 | [payment-idempotency-fixed.fml](payment-idempotency-fixed.fml) | Does key-based deduplication at the charge boundary prevent duplicate charges? | Verified; distinct payments charge and the duplicate can finish |
-
 | [faulty-link-loss.fml](faulty-link-loss.fml) | Can a fairly processed link request still fail to arrive? | Violated: explicit drop, fair lasso; delivery also reachable |
 | [faulty-link-duplicate-bug.fml](faulty-link-duplicate-bug.fml) | Can an explicit duplicating link cause two applications of one request? | Violated: duplicate application |
 | [faulty-link-duplicate-fixed.fml](faulty-link-duplicate-fixed.fml) | Does request-keyed deduplication absorb the duplicate? | Verified in scope; delivery and duplicate completion reachable |
+| [spawn-workers.fml](spawn-workers.fml) | Do two optional jobs create distinct workers, return the correct correlations, and finish? | Verified; both jobs can finish |
+| [spawn-choice-workers.fml](spawn-choice-workers.fml) | Do choice branches reserve fresh identities independently? | Verified; two-worker creation reachable |
 
 ```sh
 cargo run --locked -- check examples/counter-replies.fml --trace-out /tmp/replies.json
@@ -33,6 +34,8 @@ Actors are a computational abstraction, not deployment categories. The storage e
 The inventory repair assumes buyers commit only after an offer; it does not model reservation expiry or cancellations. The payment repair makes the ledger update and charge one atomic processor turn. It does **not** establish that an application-side cache can atomically deduplicate a separate external payment API. Duplicate payment deliveries are explicit input slots, not hidden engine behavior. Extend these models with your actual retry, crash, and external-side-effect boundaries before drawing conclusions about a real system.
 
 The faulty-link models use `choose` inside an atomic link turn. Every alternative is explored; none is forced by fairness. The engine does not lose committed sends: the link processes an incoming packet and may choose not to forward it. The repair proves duplicate-application safety, **not** eventual delivery or durability. These immediate-forwarding links do not model reordering; that requires an explicit packet buffer. `tests/faulty_links.rs` selects each obligation independently so early safety failures cannot hide another example's intended outcome.
+
+Every actor declaration is a definition only. Each example's `check.main` explicitly spawns its initial participants, supplies references, and captures optional input slots. The startup example instead enqueues its initial message directly. The spawn examples create only their coordinator in setup; `spawn_bound` counts setup and later creation together, not concurrent work. `instances(Worker)` includes potential slots from initialization so temporal requirements cover later-created workers. Pool exhaustion is inconclusive. No termination, reuse, restart, suspension, or reentrancy is modeled.
 
 Every check automatically saves a run bundle under `.fml/runs/`, including the source snapshot and all available witnesses; replay against that snapshot after editing the original model.
 

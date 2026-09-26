@@ -8,10 +8,14 @@ actor Policy {
   init(): Decision { Denied }
   handle_message(state: Decision, request: Request): Decision { decide(request) }
 }
-property "an ineligible request is denied" { always (Policy.state == Denied) }
+property "an ineligible request is denied" { always (forall (policy in instances(Policy)) { policy.state == Some(Denied) }) }
 property "the policy is exercised" { reachable (exists (i in inputs(Policy)) { i.processed }) }
 check Ineligible {
   mailbox_bound = 1
-  inputs { once send(Policy, Ineligible) }
+  spawn_bound Policy = 1
+  main {
+    let policy = spawn(Policy);
+    inputs { once send(policy, Ineligible) }
+  }
   fairness { weak runtime.progress }
 }

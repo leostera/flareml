@@ -11,7 +11,16 @@ impl Program {
             || self.actors.contains_key(name)
             || self.constructors.contains_key(name)
             || [
-                "send", "choose", "inputs", "messages", "Some", "None", "Ok", "Err",
+                "send",
+                "choose",
+                "spawn",
+                "instances",
+                "inputs",
+                "messages",
+                "Some",
+                "None",
+                "Ok",
+                "Err",
             ]
             .contains(&name)
     }
@@ -20,8 +29,19 @@ impl Program {
         names.extend(self.model.types.iter().map(|t| t.name.clone()));
         names.extend(
             [
-                "send", "choose", "inputs", "messages", "Some", "None", "Ok", "Err", "Actor",
-                "Option", "Result",
+                "send",
+                "choose",
+                "spawn",
+                "instances",
+                "inputs",
+                "messages",
+                "Some",
+                "None",
+                "Ok",
+                "Err",
+                "Actor",
+                "Option",
+                "Result",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -55,21 +75,20 @@ impl Program {
                 self.require_data(ty, f.span)?;
             }
         }
+        for (name, bound) in &self.check.spawn_bounds {
+            if *bound > 4096 || !self.actors.contains_key(name) {
+                return Err(Error::new(
+                    self.check.span,
+                    "spawn_bound requires an actor definition and a bound in 0..4096",
+                ));
+            }
+        }
         for actor in self.actors.values() {
-            if let Some((name, ty)) = &actor.key {
-                self.require_data(ty, actor.span)?;
-                if !matches!(self.resolve(ty, actor.span)?, Ty::Named(_)) {
-                    return Err(Error::new(
-                        actor.span,
-                        "actor identity requires a finite named data type",
-                    ));
-                }
-                if self.is_global(name) {
-                    return Err(Error::new(
-                        actor.span,
-                        "actor identity parameter shadows a global name",
-                    ));
-                }
+            if !self.check.spawn_bounds.contains_key(&actor.name) {
+                return Err(Error::new(
+                    actor.span,
+                    "every actor definition requires an explicit spawn_bound in the selected check",
+                ));
             }
             let state = actor
                 .state
@@ -107,24 +126,26 @@ impl Program {
             }
         }
         self.infer_effects()?;
+        for check in &self.model.checks {
+            let setup = self.effects[&check.main];
+            if setup.chooses || setup.inspects {
+                return Err(Error::new(
+                    check.span,
+                    "main setup must be deterministic and cannot inspect observations",
+                ));
+            }
+        }
         for actor in self.actors.values() {
             if let Some(init) = &actor.initializer {
                 let f = &self.functions[init];
-                let key_matches = match (&actor.key, f.params.as_slice()) {
-                    (None, []) => true,
-                    (Some((_, key)), [(_, param)]) => {
-                        self.resolve(key, actor.span)? == self.resolve(param, f.span)?
-                    }
-                    _ => false,
-                };
-                if !key_matches
-                    || self.effects[init].sends
+                if self.effects[init].sends
                     || self.effects[init].chooses
+                    || self.effects[init].spawns
                     || self.effects[init].inspects
                 {
                     return Err(Error::new(
                         f.span,
-                        "init must be pure and take only the actor identity (or no arguments for a singleton)",
+                        "init must be pure; its arguments are supplied by spawn",
                     ));
                 }
             }
@@ -193,15 +214,6 @@ impl Program {
             let mut cost = 0usize;
             visit_body(&f.body, &mut |e| {
                 cost += 1;
-                if let ExprKind::Field(_, field) = &e.kind
-                    && field == "state"
-                    && actor_target(e).is_some_and(|(path, _)| {
-                        path.strip_suffix(".state")
-                            .is_some_and(|n| self.actors.contains_key(n))
-                    })
-                {
-                    fx.inspects = true;
-                }
                 if matches!(e.kind, ExprKind::Quant { .. }) {
                     fx.inspects = true;
                 }
@@ -210,7 +222,7 @@ impl Program {
                     if self.functions.contains_key(&path) {
                         dependencies.push(path.clone());
                     }
-                    if path == "inputs" || path == "messages" {
+                    if path == "inputs" || path == "messages" || path == "instances" {
                         fx.inspects = true;
                     }
                     if path == "send" {
@@ -218,6 +230,9 @@ impl Program {
                     }
                     if path == "choose" {
                         fx.chooses = true;
+                    }
+                    if path == "spawn" {
+                        fx.spawns = true;
                     }
                 }
             });
@@ -255,10 +270,10 @@ impl Program {
                     "expanded function cost exceeds 10,000-node elaboration limit",
                 ));
             }
-            if fx.inspects && (fx.sends || fx.chooses) {
+            if fx.inspects && (fx.sends || fx.chooses || fx.spawns) {
                 return Err(Error::new(
                     self.functions[name].span,
-                    "a function cannot mix specification inspection with send/choice effects",
+                    "a function cannot mix specification inspection with send/choice/spawn effects",
                 ));
             }
             depths.insert(name.clone(), depth);
@@ -271,6 +286,12 @@ impl Program {
 fn visit_body(body: &[Stmt], visit: &mut impl FnMut(&Expr)) {
     for s in body {
         match &s.kind {
+            StmtKind::Inputs(inputs) => {
+                for input in inputs {
+                    visit_expr(&input.target, visit);
+                    visit_expr(&input.value, visit);
+                }
+            }
             StmtKind::Let(_, e) | StmtKind::Expr(e) => visit_expr(e, visit),
             StmtKind::Match(e, arms) => {
                 visit_expr(e, visit);

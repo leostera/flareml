@@ -62,20 +62,16 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
         trace.actions.len()
     )
     .unwrap();
-    for (name, value) in &trace.states[0].actors {
-        writeln!(
-            out,
-            "    {} {name}.state = {value}",
-            paint("initial", Tone::Dim, color)
-        )
-        .unwrap();
-    }
-    for (name, instances) in &trace.states[0].keyed_actors {
-        for (key, value) in instances {
+    for (name, slots) in &trace.states[0].spawned {
+        for (index, value) in slots.iter().enumerate() {
             writeln!(
                 out,
-                "    {} {name}.at({key}).state = {value}",
-                paint("initial", Tone::Dim, color)
+                "    {}",
+                paint(
+                    &safe(&format!("initial {name}[instance #{index}] = {value}")),
+                    Tone::Dim,
+                    color
+                )
             )
             .unwrap();
         }
@@ -126,26 +122,32 @@ pub fn render_trace(trace: &Trace, file: &str, source: &str, color: bool) -> Str
             )
             .unwrap();
         }
+        for spawn in &action.spawns {
+            let (line, col) = location(source, spawn.span);
+            writeln!(
+                out,
+                "        {}",
+                paint(
+                    &safe(&format!(
+                        "spawn {} initialized to {} at {}:{line}:{col}",
+                        spawn.address, spawn.initial, file
+                    )),
+                    Tone::Accent,
+                    color,
+                )
+            )
+            .unwrap();
+        }
         let before = &trace.states[i];
         let after = &trace.states[i + 1];
-        for (actor, value) in &after.actors {
-            if before.actors.get(actor) != Some(value) {
-                writeln!(
-                    out,
-                    "        {}",
-                    paint(&format!("{actor}.state := {value}"), Tone::Warn, color)
-                )
-                .unwrap();
-            }
-        }
-        for (actor, instances) in &after.keyed_actors {
-            for (key, value) in instances {
-                if before.keyed_actors.get(actor).and_then(|xs| xs.get(key)) != Some(value) {
+        for (actor, slots) in &after.spawned {
+            for (index, value) in slots.iter().enumerate() {
+                if before.spawned.get(actor).and_then(|s| s.get(index)) != Some(value) {
                     writeln!(
                         out,
                         "        {}",
                         paint(
-                            &format!("{actor}.at({key}).state := {value}"),
+                            &safe(&format!("{actor}[instance #{index}] := {value}")),
                             Tone::Warn,
                             color
                         )
