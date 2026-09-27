@@ -1,0 +1,10 @@
+{
+  "reason": "Provider transport failures, not candidate correctness or budget failures",
+  "policy": "Fresh full Pi generations, same frozen harness and budgets. Retain original attempts. No retries of coding or budget failures.",
+  "cells": [
+    {"eval":"manifest-publication-typescript","mode":"tla","originalTrialId":"61816fdc-155e-4df7-aa6b-732f66982c1c","observedErrors":["WebSocket error","fetch failed"],"retryCampaign":"distributed-002-retry-typescript"},
+    {"eval":"manifest-publication-python","mode":"flareml","originalTrialId":"37e6b766-b39c-419e-b9a7-7e52a1c6def7","observedErrors":["fetch failed"],"retryCampaign":"distributed-002-retry-python"},
+    {"eval":"manifest-publication-python","mode":"tla","originalTrialId":"5523b32c-eab9-4abe-b054-c79141f27528","observedErrors":["fetch failed"],"retryCampaign":"distributed-002-retry-python"},
+    {"eval":"manifest-publication-python","mode":"baseline","originalTrialId":"6f601f9b-b3da-4004-baf3-718db07e3df3","observedErrors":["fetch failed"],"retryCampaign":"distributed-002-retry-python"}
+  ]
+}

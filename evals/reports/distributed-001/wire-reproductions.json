@@ -1,0 +1,128 @@
+{
+  "note": "Actual responses from unchanged saved candidates. These are diagnostics, not replacement trials.",
+  "results": [
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "baseline",
+      "originalTrialId": "ad6f8b2c-b70f-4327-9b86-f186d68c559f",
+      "transcript": [
+        {
+          "input": {
+            "kind": "init",
+            "node": 1,
+            "nodes": [
+              0,
+              1,
+              2
+            ],
+            "leader": 0,
+            "epoch": 1,
+            "now": 0,
+            "completed": []
+          },
+          "output": []
+        },
+        {
+          "input": {
+            "kind": "tick",
+            "now": 0
+          },
+          "output": null
+        }
+      ]
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "flareml",
+      "originalTrialId": "80f74359-62f2-4808-9c3c-5021b47bf73c",
+      "transcript": [
+        {
+          "input": {
+            "kind": "init",
+            "node": 2,
+            "nodes": [
+              0,
+              1,
+              2
+            ],
+            "leader": 2,
+            "epoch": 1,
+            "now": 0,
+            "completed": []
+          },
+          "output": []
+        },
+        {
+          "input": {
+            "kind": "tick",
+            "now": 0
+          },
+          "output": [
+            {
+              "kind": "propose",
+              "token": "n2-e1-1",
+              "epoch": 1,
+              "until": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "tla",
+      "originalTrialId": "61ae1a3a-cb9c-4213-a447-377d0d4264f2",
+      "transcript": [
+        {
+          "input": {
+            "kind": "init",
+            "node": 1,
+            "nodes": [
+              0,
+              1,
+              2
+            ],
+            "leader": 1,
+            "epoch": 1,
+            "now": 0,
+            "completed": []
+          },
+          "output": []
+        },
+        {
+          "input": {
+            "kind": "tick",
+            "now": 4
+          },
+          "output": [
+            {
+              "epoch": 1,
+              "holder": 1,
+              "kind": "propose",
+              "token": "1-1-1",
+              "until": 8
+            }
+          ]
+        },
+        {
+          "input": {
+            "kind": "result",
+            "now": 4,
+            "token": "1-1-1",
+            "ok": false,
+            "entry": null
+          },
+          "output": [
+            {
+              "epoch": 1,
+              "holder": 1,
+              "kind": "propose",
+              "token": "1-1-2",
+              "until": 8
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

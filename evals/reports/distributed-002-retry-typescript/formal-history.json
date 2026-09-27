@@ -1,0 +1,88 @@
+{
+  "note": "Saved history only. Counts are not a bug-discovery score. Review counterexamples, property changes, assumptions and subsequent code/test changes.",
+  "rows": [
+    {
+      "eval": "manifest-publication-typescript",
+      "mode": "tla",
+      "trialId": "cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03",
+      "statuses": {
+        "INVARIANT_VIOLATION": 2,
+        "VERIFIED_IN_SCOPE": 2
+      },
+      "checks": [
+        {
+          "id": "1790511436227-93440",
+          "model": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.tla",
+          "config": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.cfg",
+          "modelSha256": "6c85e74a6ba6bd72b45fed42baf61ab959af51ee10184ff03ba7a3e1d25e4ef1",
+          "configSha256": "e878c73549c410a49bd9e84b2962c05295461800ea7020dbf604cb4bd56e81ed",
+          "code": 12,
+          "timedOut": false,
+          "verified": false,
+          "violation": "Safe",
+          "status": "INVARIANT_VIOLATION",
+          "hasDeclaredInvariant": true,
+          "hasDeclaredTemporalProperty": false,
+          "toolRelease": "1.7.4",
+          "configurationText": "SPECIFICATION Spec\nINVARIANT Safe\nCONSTANT V = {1, 2}\nCHECK_DEADLOCK FALSE\n",
+          "source": ".tla/runs/1790511436227-93440/model.tla",
+          "classificationNote": "Requires review: may be an intentional negated reachability witness, not a design bug."
+        },
+        {
+          "id": "1790511445495-93444",
+          "model": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.tla",
+          "config": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/PublicationCover.cfg",
+          "modelSha256": "970db53fd057a55593d9780a3ced4e9178cbdc2080e55b6beae5ac4da26fc519",
+          "configSha256": "ab2694de764995933d52de1f44742fd7abb4d3cd76de5b93f4c7f3a6325bfc03",
+          "code": 12,
+          "timedOut": false,
+          "verified": false,
+          "violation": "NotYetPublished2",
+          "status": "INVARIANT_VIOLATION",
+          "hasDeclaredInvariant": true,
+          "hasDeclaredTemporalProperty": false,
+          "toolRelease": "1.7.4",
+          "configurationText": "SPECIFICATION Spec\nINVARIANT NotYetPublished2\nCONSTANT V = {1, 2}\nCHECK_DEADLOCK FALSE\n",
+          "source": ".tla/runs/1790511445495-93444/model.tla",
+          "classificationNote": "Requires review: may be an intentional negated reachability witness, not a design bug."
+        },
+        {
+          "id": "1790511445495-93443",
+          "model": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.tla",
+          "config": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.cfg",
+          "modelSha256": "970db53fd057a55593d9780a3ced4e9178cbdc2080e55b6beae5ac4da26fc519",
+          "configSha256": "e878c73549c410a49bd9e84b2962c05295461800ea7020dbf604cb4bd56e81ed",
+          "code": 0,
+          "timedOut": false,
+          "verified": true,
+          "violation": null,
+          "status": "VERIFIED_IN_SCOPE",
+          "hasDeclaredInvariant": true,
+          "hasDeclaredTemporalProperty": false,
+          "toolRelease": "1.7.4",
+          "configurationText": "SPECIFICATION Spec\nINVARIANT Safe\nCONSTANT V = {1, 2}\nCHECK_DEADLOCK FALSE\n",
+          "source": ".tla/runs/1790511445495-93443/model.tla",
+          "classificationNote": null
+        },
+        {
+          "id": "1790511545042-93483",
+          "model": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.tla",
+          "config": "/private/var/folders/v0/6x4x9vzn10gbdxpzdnsfyxwh0000gn/T/flareml-evalkit-workspaces/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03/candidate/Publication.cfg",
+          "modelSha256": "970db53fd057a55593d9780a3ced4e9178cbdc2080e55b6beae5ac4da26fc519",
+          "configSha256": "e878c73549c410a49bd9e84b2962c05295461800ea7020dbf604cb4bd56e81ed",
+          "code": 0,
+          "timedOut": false,
+          "verified": true,
+          "violation": null,
+          "status": "VERIFIED_IN_SCOPE",
+          "hasDeclaredInvariant": true,
+          "hasDeclaredTemporalProperty": false,
+          "toolRelease": "1.7.4",
+          "configurationText": "SPECIFICATION Spec\nINVARIANT Safe\nCONSTANT V = {1, 2}\nCHECK_DEADLOCK FALSE\n",
+          "source": ".tla/runs/1790511545042-93483/model.tla",
+          "classificationNote": null
+        }
+      ]
+    }
+  ]
+}

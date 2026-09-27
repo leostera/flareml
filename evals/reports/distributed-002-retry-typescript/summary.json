@@ -1,0 +1,93 @@
+{
+  "campaign": "distributed-002-retry-typescript",
+  "aggregate": {
+    "tla": {
+      "cells": 1,
+      "completedExecutions": 1,
+      "passingTrials": 1,
+      "correctImplementations": 1,
+      "casesPassed": 12,
+      "casesEvaluated": 12,
+      "agentSeconds": 145.763,
+      "tokens": 112151,
+      "input": 27631,
+      "output": 6184,
+      "cacheRead": 78336,
+      "incompleteUsageRecords": 0,
+      "reportedCostUSD": 0.0066384600000000005
+    }
+  },
+  "toolUseCountersAreHeuristic": true,
+  "status": "completed",
+  "versions": {
+    "pi": "0.87.1",
+    "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "go": "go version go1.25.4 darwin/arm64",
+    "bun": "1.4.2",
+    "python": "Python 3.14.3",
+    "java": "openjdk 25.0.2 2026-01-20\nOpenJDK Runtime Environment Homebrew (build 25.0.2)\nOpenJDK 64-Bit Server VM Homebrew (build 25.0.2, mixed mode, sharing)",
+    "flareml": "fml 0.5.0"
+  },
+  "model": "openai-codex/gpt-6-luna",
+  "thinking": "high",
+  "limits": {
+    "maxTokens": 600000,
+    "turnBudget": 80,
+    "chatTimeoutMs": 720000
+  },
+  "expectedCells": 1,
+  "completedCells": 1,
+  "rows": [
+    {
+      "eval": "manifest-publication-typescript",
+      "mode": "tla",
+      "runId": "95868975-acd7-4739-9ff5-dea873d0a6a7",
+      "trialId": "cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "4 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+      "agentSeconds": 145.763,
+      "totalSeconds": 146.264,
+      "tokens": 112151,
+      "input": 27631,
+      "output": 6184,
+      "cacheRead": 78336,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.0066384600000000005,
+      "costIsInvoice": false,
+      "turns": 16,
+      "toolCalls": 19,
+      "flaremlCalls": 0,
+      "tlaCalls": 4,
+      "checkCalls": 0,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/95868975-acd7-4739-9ff5-dea873d0a6a7",
+      "evidence": "_evalkit-evidence/cd5a5a66-280f-4eb1-8a78-7aa54bc4cf03"
+    }
+  ],
+  "pairs": [],
+  "limitations": [
+    "One trial per cell: descriptive pilot, not a statistically supported treatment effect.",
+    "Controlled storage/log services and asynchronous delivery between real processes; not a deployed network benchmark. See the task-specific clock and durability assumptions.",
+    "Local Pi filesystem boundaries are instructions/directories, not an adversarial security sandbox.",
+    "Caches and sequential execution order affect time/cost; treatment order is rotated.",
+    "Provider usage includes reported cache tokens and reasoning inside output. A zero reported price is unavailable pricing, not free compute.",
+    "Mode adherence is a smoke gate: shell-command keyword counts and saved complete reports, not exec tracing or proof adequacy. Supplemental model reruns and manual review are separate.",
+    "Cases share a specification across languages; performance of the generated service is not benchmarked."
+  ]
+}

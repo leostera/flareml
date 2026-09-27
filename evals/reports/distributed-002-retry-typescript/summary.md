@@ -1,0 +1,30 @@
+# FlareML-assisted coding pilot: distributed-002-retry-typescript
+
+Status: **completed**. 1/1 cells recorded. Model: `openai-codex/gpt-6-luna` (high).
+
+| Eval | Mode | Correctness | Workflow | Agent seconds | Total tokens | Outcome |
+|---|---|---:|---|---:|---:|---|
+| manifest-publication-typescript | tla | 12/12 | pass | 145.8 | 112151 | completed |
+
+## Totals (descriptive, not a statistical estimate)
+
+| Mode | Passing implementations | Successful executions | Cases | Agent seconds | Tokens including cache |
+|---|---:|---:|---:|---:|---:|
+| tla | 1/1 | 1/1 | 12/12 | 145.8 | 112151 |
+
+## Paired differences (assisted minus baseline)
+
+| Eval | Assisted mode | Token delta | Token ratio | Seconds delta | Time ratio |
+|---|---|---:|---:|---:|---:|
+
+## Limitations
+
+- One trial per cell: descriptive pilot, not a statistically supported treatment effect.
+- Controlled storage/log services and asynchronous delivery between real processes; not a deployed network benchmark. See the task-specific clock and durability assumptions.
+- Local Pi filesystem boundaries are instructions/directories, not an adversarial security sandbox.
+- Caches and sequential execution order affect time/cost; treatment order is rotated.
+- Provider usage includes reported cache tokens and reasoning inside output. A zero reported price is unavailable pricing, not free compute.
+- Mode adherence is a smoke gate: shell-command keyword counts and saved complete reports, not exec tracing or proof adequacy. Supplemental model reruns and manual review are separate.
+- Cases share a specification across languages; performance of the generated service is not benchmarked.
+
+Run IDs, case failures, budgets, usage breakdown, and evidence locations are in `summary.json`. Raw EvalKit reports and Pi streams remain local and ignored by Git.

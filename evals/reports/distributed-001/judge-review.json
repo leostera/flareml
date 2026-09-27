@@ -1,0 +1,1356 @@
+{
+  "review": "Node-ID permutations and held-read/GC schedules.",
+  "note": "Supplemental EvalKit regrade of unchanged artifacts, not new agent trials. Original reports are unchanged; no provider calls or repairs.",
+  "records": [
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "baseline",
+      "originalTrialId": "c5b50a16-223f-4cdc-ac97-d4bb64d8ee9d",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 3908,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "8927fe2a-adca-4375-ba92-1629d688b913",
+        "runUri": "evalkit:run:8927fe2a-adca-4375-ba92-1629d688b913",
+        "trialId": "e2af96fc-7a00-4ee8-963e-78baf1ddd425",
+        "trialUri": "evalkit:trial:e2af96fc-7a00-4ee8-963e-78baf1ddd425",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-rust-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/8927fe2a-adca-4375-ba92-1629d688b913",
+        "durationMs": 6660,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 6646,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "flareml",
+      "originalTrialId": "548e1997-51cf-4520-9065-43a74192e5d4",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 4148,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 2,
+            "value": 1,
+            "passed": true,
+            "explanation": "10 observed calls; 8 saved models; 3 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 10,
+              "models": 8,
+              "verified": 3
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "37340f67-19e7-4a79-aa28-830d1705beaa",
+        "runUri": "evalkit:run:37340f67-19e7-4a79-aa28-830d1705beaa",
+        "trialId": "a9834f88-3f74-4171-9df1-1a7ba97a9b71",
+        "trialUri": "evalkit:trial:a9834f88-3f74-4171-9df1-1a7ba97a9b71",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-rust-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/37340f67-19e7-4a79-aa28-830d1705beaa",
+        "durationMs": 5532,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 5501,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "tla",
+      "originalTrialId": "61ae1a3a-cb9c-4213-a447-377d0d4264f2",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 4338,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 0,
+            "value": 1,
+            "passed": true,
+            "explanation": "13 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 13,
+              "verified": 2
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "0866e9ca-d5da-49e0-86ad-19424e06405d",
+        "runUri": "evalkit:run:0866e9ca-d5da-49e0-86ad-19424e06405d",
+        "trialId": "0957f7b2-5a22-4df7-933e-a7c6a07ea9d6",
+        "trialUri": "evalkit:trial:0957f7b2-5a22-4df7-933e-a7c6a07ea9d6",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-rust-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/0866e9ca-d5da-49e0-86ad-19424e06405d",
+        "durationMs": 6312,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 6262,
+              "value": 0,
+              "passed": false,
+              "explanation": "0/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 0,
+                "total": 24,
+                "failures": [
+                  {
+                    "name": "1,2,0/handover-replay/seed-1",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-17",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-17",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-17",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-1729",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1729",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1729",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-64007",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-64007",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-64007",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-17",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-17",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-17",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1729",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1729",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1729",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-64007",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-64007",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-64007",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "flareml",
+      "originalTrialId": "80f74359-62f2-4808-9c3c-5021b47bf73c",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 592,
+            "value": 0.3333333333333333,
+            "passed": false,
+            "explanation": "4/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 4,
+              "total": 12,
+              "failures": [
+                {
+                  "name": "lag-and-stale-results/seed-1",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-1",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                },
+                {
+                  "name": "lag-and-stale-results/seed-17",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-17",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                },
+                {
+                  "name": "lag-and-stale-results/seed-1729",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-1729",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                },
+                {
+                  "name": "lag-and-stale-results/seed-64007",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-64007",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                }
+              ]
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 4,
+            "value": 1,
+            "passed": true,
+            "explanation": "10 observed calls; 8 saved models; 1 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 10,
+              "models": 8,
+              "verified": 1
+            }
+          }
+        ],
+        "overall": 0.6666666666666666,
+        "passed": false
+      },
+      "review": {
+        "runId": "3f3506c5-ff69-4d8a-a395-517094422d20",
+        "runUri": "evalkit:run:3f3506c5-ff69-4d8a-a395-517094422d20",
+        "trialId": "7a633358-4907-44ba-b47b-33c7d142e9d6",
+        "trialUri": "evalkit:trial:7a633358-4907-44ba-b47b-33c7d142e9d6",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-go-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/3f3506c5-ff69-4d8a-a395-517094422d20",
+        "durationMs": 1605,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 1580,
+              "value": 0,
+              "passed": false,
+              "explanation": "0/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 0,
+                "total": 24,
+                "failures": [
+                  {
+                    "name": "1,2,0/handover-replay/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "tla",
+      "originalTrialId": "a0e3c894-3307-46fd-804c-cf9dd996d62f",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 619,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "8 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 8,
+              "verified": 2
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "1aa6f018-53fe-4a0a-8763-478fb7272386",
+        "runUri": "evalkit:run:1aa6f018-53fe-4a0a-8763-478fb7272386",
+        "trialId": "f5326674-4d8c-4f38-8fa8-8a3f6fda7ab0",
+        "trialUri": "evalkit:trial:f5326674-4d8c-4f38-8fa8-8a3f6fda7ab0",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-go-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/1aa6f018-53fe-4a0a-8763-478fb7272386",
+        "durationMs": 2224,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 2194,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "baseline",
+      "originalTrialId": "ad6f8b2c-b70f-4327-9b86-f186d68c559f",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 521,
+            "value": 0,
+            "passed": false,
+            "explanation": "0/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 0,
+              "total": 12,
+              "failures": [
+                {
+                  "name": "handover-replay/seed-1",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-1",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-1",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "handover-replay/seed-17",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-17",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-17",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "handover-replay/seed-1729",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-1729",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-1729",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "handover-replay/seed-64007",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-64007",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-64007",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                }
+              ]
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 0,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 0.5,
+        "passed": false
+      },
+      "review": {
+        "runId": "14a31b04-01db-42b3-95c7-1e74459d2e6f",
+        "runUri": "evalkit:run:14a31b04-01db-42b3-95c7-1e74459d2e6f",
+        "trialId": "798c49e4-3707-4adc-be0e-5535c28191b4",
+        "trialUri": "evalkit:trial:798c49e4-3707-4adc-be0e-5535c28191b4",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-go-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/14a31b04-01db-42b3-95c7-1e74459d2e6f",
+        "durationMs": 1520,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 1507,
+              "value": 0,
+              "passed": false,
+              "explanation": "0/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 0,
+                "total": 24,
+                "failures": [
+                  {
+                    "name": "1,2,0/handover-replay/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-17",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1729",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-64007",
+                    "error": "Error: invalid proposal/token"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "tla",
+      "originalTrialId": "37b89cf6-82a6-4a64-99c4-bfdcef7cd870",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 16,
+            "value": 0,
+            "passed": false,
+            "explanation": "Candidate build failed",
+            "evidence": {
+              "buildExit": 1,
+              "stderr": "error: ModuleNotFound resolving \"./main.ts\" (entry point)\n"
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "15 recorded TLC invocations; 1 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 15,
+              "verified": 1
+            }
+          }
+        ],
+        "overall": 0.5,
+        "passed": false
+      },
+      "review": {
+        "runId": "8c84d230-317e-4890-b9cc-d849dec1b9e5",
+        "runUri": "evalkit:run:8c84d230-317e-4890-b9cc-d849dec1b9e5",
+        "trialId": "1df19188-1f6f-452d-bfad-1fc3e7643049",
+        "trialUri": "evalkit:trial:1df19188-1f6f-452d-bfad-1fc3e7643049",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-typescript-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/8c84d230-317e-4890-b9cc-d849dec1b9e5",
+        "durationMs": 57,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 12,
+              "value": 0,
+              "passed": false,
+              "explanation": "Frozen candidate build failed",
+              "evidence": {
+                "stderr": "error: ModuleNotFound resolving \"./main.ts\" (entry point)\n"
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "baseline",
+      "originalTrialId": "e5dbf2b4-37c1-42c6-95f2-3cb871a174f9",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 725,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "8ae096e5-7967-417b-9b6c-dd9efcda2c3f",
+        "runUri": "evalkit:run:8ae096e5-7967-417b-9b6c-dd9efcda2c3f",
+        "trialId": "f2526269-4719-408d-8f42-0faa4e036a06",
+        "trialUri": "evalkit:trial:f2526269-4719-408d-8f42-0faa4e036a06",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-typescript-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/8ae096e5-7967-417b-9b6c-dd9efcda2c3f",
+        "durationMs": 2679,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 2673,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "flareml",
+      "originalTrialId": "d81a9e41-0fb1-4484-8d42-f680844c1f45",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 467,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 3,
+            "value": 1,
+            "passed": true,
+            "explanation": "7 observed calls; 6 saved models; 4 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 7,
+              "models": 6,
+              "verified": 4
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "d79b4ac7-a28a-4199-98df-6ad0098568a1",
+        "runUri": "evalkit:run:d79b4ac7-a28a-4199-98df-6ad0098568a1",
+        "trialId": "882096d8-4abd-48a6-b230-fceaa713434c",
+        "trialUri": "evalkit:trial:882096d8-4abd-48a6-b230-fceaa713434c",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-typescript-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/d79b4ac7-a28a-4199-98df-6ad0098568a1",
+        "durationMs": 2188,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 2163,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "baseline",
+      "originalTrialId": "ca12a7e0-2691-46fb-b2f1-9e81c74b5afb",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 732,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "7dca2253-4be0-4182-8559-3f47f53171ca",
+        "runUri": "evalkit:run:7dca2253-4be0-4182-8559-3f47f53171ca",
+        "trialId": "663510a7-e6d1-44ef-ad10-9ea82746dbed",
+        "trialUri": "evalkit:trial:663510a7-e6d1-44ef-ad10-9ea82746dbed",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-python-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/7dca2253-4be0-4182-8559-3f47f53171ca",
+        "durationMs": 2754,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 2740,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "flareml",
+      "originalTrialId": "42457542-c6f6-48a2-8b17-9ac1deab9b26",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 939,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "7 observed calls; 4 saved models; 3 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 7,
+              "models": 4,
+              "verified": 3
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "1ca829ca-b474-4e88-933f-9014e750c722",
+        "runUri": "evalkit:run:1ca829ca-b474-4e88-933f-9014e750c722",
+        "trialId": "12532873-9a81-4e9b-acd1-31cb7845b0d9",
+        "trialUri": "evalkit:trial:12532873-9a81-4e9b-acd1-31cb7845b0d9",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-python-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/1ca829ca-b474-4e88-933f-9014e750c722",
+        "durationMs": 3185,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 3159,
+              "value": 1,
+              "passed": true,
+              "explanation": "24/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 24,
+                "total": 24,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "tla",
+      "originalTrialId": "db2de38e-9267-4a7f-8dd4-833557cd8764",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 730,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 0,
+            "value": 1,
+            "passed": true,
+            "explanation": "12 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 12,
+              "verified": 2
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "b07412cd-dbea-41c7-9047-8d9fe90c831e",
+        "runUri": "evalkit:run:b07412cd-dbea-41c7-9047-8d9fe90c831e",
+        "trialId": "2cc2f418-c7bf-4d6f-b6b0-f6317fdde267",
+        "trialUri": "evalkit:trial:2cc2f418-c7bf-4d6f-b6b0-f6317fdde267",
+        "trialIndex": 0,
+        "evalId": "review-checkpoint-coordination-python-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/b07412cd-dbea-41c7-9047-8d9fe90c831e",
+        "durationMs": 2188,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 2140,
+              "value": 0,
+              "passed": false,
+              "explanation": "0/24 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 0,
+                "total": 24,
+                "failures": [
+                  {
+                    "name": "1,2,0/handover-replay/seed-1",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-17",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-17",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-17",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-1729",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-1729",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-1729",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/handover-replay/seed-64007",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/lag-and-stale-results/seed-64007",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "1,2,0/restart-primary/seed-64007",
+                    "error": "Error: primary never issued work"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-17",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-17",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-17",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-1729",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-1729",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-1729",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/handover-replay/seed-64007",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/lag-and-stale-results/seed-64007",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  },
+                  {
+                    "name": "2,0,1/restart-primary/seed-64007",
+                    "error": "Error: healthy secondary 1 did not complete two checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "manifest-publication-rust",
+      "mode": "flareml",
+      "originalTrialId": "db57ba4e-0483-4142-b744-d81cd765f3a7",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 3932,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 3,
+            "value": 1,
+            "passed": true,
+            "explanation": "11 observed calls; 9 saved models; 4 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 11,
+              "models": 9,
+              "verified": 4
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "f78f6427-7587-4849-a5f2-9b1149d36b61",
+        "runUri": "evalkit:run:f78f6427-7587-4849-a5f2-9b1149d36b61",
+        "trialId": "1db0311f-0eb9-421b-86fb-77da95e8d8a2",
+        "trialUri": "evalkit:trial:1db0311f-0eb9-421b-86fb-77da95e8d8a2",
+        "trialIndex": 0,
+        "evalId": "review-manifest-publication-rust-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/f78f6427-7587-4849-a5f2-9b1149d36b61",
+        "durationMs": 4001,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 3975,
+              "value": 1,
+              "passed": true,
+              "explanation": "12/12 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 12,
+                "total": 12,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    }
+  ]
+}

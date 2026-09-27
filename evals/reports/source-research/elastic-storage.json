@@ -1,0 +1,49 @@
+{
+  "kind": "upstream-source-diagnostic-not-agent-evaluation",
+  "source": "https://raw.githubusercontent.com/elastic/elasticsearch-formal-models/ca30663506a7e18de9d23fabbc70a369903d7c98/Storage/tla/Storage.tla",
+  "revision": "ca30663506a7e18de9d23fabbc70a369903d7c98",
+  "upstreamSourceSha256": "112c884d8d6e38fdd7ab964154b2898fc010f722f51eb6ec1da8a9e7e6b2990f",
+  "license": "Apache-2.0; original license retained with diagnostic sources",
+  "tlc": {
+    "version": "1.7.4",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+  },
+  "scope": {
+    "maxNewMeta": 3,
+    "stateConstraint": "newMeta < MaxNewMeta",
+    "deadlockChecking": false,
+    "workers": 1,
+    "heapMiB": 512,
+    "timeoutSeconds": 60
+  },
+  "limitations": [
+    "Bounded, state-constrained safety check; not an unbounded proof or liveness check.",
+    "This upstream model has a single control flow with uncertain storage outcomes, not a multi-node distributed implementation.",
+    "Switches between upstream-provided cleanup variants; no agent designed or repaired these models."
+  ],
+  "rows": [
+    {
+      "variant": "fixed",
+      "exitCode": 0,
+      "verified": true,
+      "violation": null,
+      "durationMs": 841,
+      "modelSha256": "112c884d8d6e38fdd7ab964154b2898fc010f722f51eb6ec1da8a9e7e6b2990f",
+      "generated": 863,
+      "distinct": 278,
+      "evidence": "/Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/source-research/elastic-storage-1790494918061/fixed"
+    },
+    {
+      "variant": "buggy",
+      "exitCode": 12,
+      "verified": false,
+      "violation": "MetadataFileReferencedByManifestExists",
+      "durationMs": 675,
+      "modelSha256": "699ed3afd33a2952a0843c425230423f29d6739dc1322c5649bc0025177aae1e",
+      "generated": 42,
+      "distinct": 29,
+      "evidence": "/Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/source-research/elastic-storage-1790494918061/buggy"
+    }
+  ]
+}

@@ -1,0 +1,354 @@
+{
+  "note": "Supplemental rerun of candidate-authored models outside saved artifacts/docs. Does not establish model adequacy or code correspondence. Original grades are unchanged.",
+  "limits": {
+    "maxStates": 10000,
+    "timeout": "5s"
+  },
+  "rows": [
+    {
+      "eval": "url-shortener-rust",
+      "trialId": "cba8bc9a-0065-4009-b720-12cdaa295ea2",
+      "savedReports": {
+        "INVALID_MODEL": 2,
+        "VERIFIED_IN_SCOPE": 1
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "3b31c5de294c279c8c6453617e9a5374626acbf50703d2e7520c996a628fc97b",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 21,
+          "edges": 49,
+          "claims": [
+            {
+              "name": "acknowledgements follow durable ownership",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "worker can complete successfully",
+              "kind": "Cover",
+              "result": "REACHED"
+            },
+            {
+              "name": "waiting worker eventually responds",
+              "kind": "Property",
+              "result": "VERIFIED_IN_SCOPE"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/cba8bc9a-0065-4009-b720-12cdaa295ea2/model-audit/0/1790470772801055000-56109-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "url-shortener-go",
+      "trialId": "52b134fb-f543-4c85-bc6e-1bab1a7a3593",
+      "savedReports": {
+        "VERIFIED_IN_SCOPE": 2
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "595c4e558b35d07468be02b611d4b35356d91ae020cb6b79386221e5a6a810de",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 21,
+          "edges": 49,
+          "claims": [
+            {
+              "name": "durable binding never changes",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "completed decision matches durable owner",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "submitted workers complete",
+              "kind": "Property",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "successful progress is reachable",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/52b134fb-f543-4c85-bc6e-1bab1a7a3593/model-audit/0/1790470772808233000-56110-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "url-shortener-typescript",
+      "trialId": "38876692-9878-4b97-bcef-33a11d101ac2",
+      "savedReports": {
+        "INVALID_MODEL": 3,
+        "VERIFIED_IN_SCOPE": 2
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "f147dee901e4a3de1c33171387c6cd9dca5e46c8c2567070c88232e33be796c7",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 48,
+          "edges": 118,
+          "claims": [
+            {
+              "name": "success responses agree with durable owner",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "successful durable binding is reachable",
+              "kind": "Cover",
+              "result": "REACHED"
+            },
+            {
+              "name": "second URL can durably bind if uncontended",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/38876692-9878-4b97-bcef-33a11d101ac2/model-audit/0/1790470772814711000-56111-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "inventory-rust",
+      "trialId": "17be0d8f-30bc-4999-81b7-4fe481764e37",
+      "savedReports": {
+        "INVALID_MODEL": 3,
+        "VERIFIED_IN_SCOPE": 2
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "0d9529d11476e4b0d3b95671587585f09c673fa853ff8bfedc60adab3a4608ce",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 52,
+          "edges": 128,
+          "claims": [
+            {
+              "name": "terminal outcomes are absorbing",
+              "kind": "Property",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "terminal transition is reachable",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/17be0d8f-30bc-4999-81b7-4fe481764e37/model-audit/0/1790470772822102000-56112-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "inventory-go",
+      "trialId": "4a6048ba-6857-40ed-a861-a7e76e73d4d4",
+      "savedReports": {
+        "INVALID_MODEL": 7,
+        "VERIFIED_IN_SCOPE": 1
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "3fbf4b1f9d71e5e55839902c317b594e7f05f6c13e98d5d611e8a20988e22587",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 201,
+          "edges": 543,
+          "claims": [
+            {
+              "name": "stock accounting is always coherent",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "a reservation can be committed",
+              "kind": "Cover",
+              "result": "REACHED"
+            },
+            {
+              "name": "submitted operations are processed",
+              "kind": "Property",
+              "result": "VERIFIED_IN_SCOPE"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/4a6048ba-6857-40ed-a861-a7e76e73d4d4/model-audit/0/1790470772830096000-56114-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "inventory-typescript",
+      "trialId": "0ecb2f73-1b49-429e-86d5-0a4f41ee070e",
+      "savedReports": {
+        "INVALID_MODEL": 3,
+        "VERIFIED_IN_SCOPE": 3
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "35f364b160aff2cd67c984a2ba3690b8c68304b1be5eb1b13946b389b762c988",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 21,
+          "edges": 49,
+          "claims": [
+            {
+              "name": "successful client corresponds to consumed stock",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "both contenders have a serial outcome",
+              "kind": "Cover",
+              "result": "REACHED"
+            },
+            {
+              "name": "a reservation success is reachable",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/0ecb2f73-1b49-429e-86d5-0a4f41ee070e/model-audit/0/1790470772840773000-56115-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "payments-rust",
+      "trialId": "2948dda8-f8c6-485b-b188-62e292a17870",
+      "savedReports": {
+        "INVALID_MODEL": 3,
+        "VERIFIED_IN_SCOPE": 2
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "14c7055b006d524360053a209b6a0609da290d8fe2c986dcda28b7745c5e1257",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 81,
+          "edges": 225,
+          "claims": [
+            {
+              "name": "store balance remains nonnegative",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "both requests can finish",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/2948dda8-f8c6-485b-b188-62e292a17870/model-audit/0/1790470772847624000-56116-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "payments-go",
+      "trialId": "da92feab-8f38-4d36-a664-348ae8812fc9",
+      "savedReports": {
+        "INVALID_MODEL": 7,
+        "VERIFIED_IN_SCOPE": 1
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "c1519b5e1b8c5d7d0b2245741419b6272792af10e450125c10d4163a8f19bcda",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 81,
+          "edges": 221,
+          "claims": [
+            {
+              "name": "ledger never overdraws",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "a charge can commit",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/da92feab-8f38-4d36-a664-348ae8812fc9/model-audit/0/1790470772856217000-56117-0\n"
+        }
+      ]
+    },
+    {
+      "eval": "payments-typescript",
+      "trialId": "626f833a-0510-4712-83e8-9916f9d03fb2",
+      "savedReports": {
+        "VERIFIED_IN_SCOPE": 2,
+        "INVALID_MODEL": 3
+      },
+      "models": [
+        {
+          "path": "design.fml",
+          "sha256": "be0b9279d1716dfe6cf2c385dfc2e80d417ad088b2bbd372cd06832f7550d410",
+          "exitCode": 0,
+          "status": "VERIFIED_IN_SCOPE",
+          "complete": true,
+          "states": 51,
+          "edges": 127,
+          "claims": [
+            {
+              "name": "ledger state is always valid",
+              "kind": "Invariant",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "charge can complete",
+              "kind": "Cover",
+              "result": "REACHED"
+            },
+            {
+              "name": "each started charge eventually completes",
+              "kind": "Property",
+              "result": "VERIFIED_IN_SCOPE"
+            },
+            {
+              "name": "charged state is reachable",
+              "kind": "Cover",
+              "result": "REACHED"
+            }
+          ],
+          "hasNonCoverClaim": true,
+          "hasReachedCover": true,
+          "stderr": "Artifacts: /Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/626f833a-0510-4712-83e8-9916f9d03fb2/model-audit/0/1790470772866137000-56118-0\n"
+        }
+      ]
+    }
+  ]
+}

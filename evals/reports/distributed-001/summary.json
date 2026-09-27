@@ -1,0 +1,829 @@
+{
+  "campaign": "distributed-001",
+  "aggregate": {
+    "baseline": {
+      "cells": 4,
+      "completedExecutions": 4,
+      "passingTrials": 3,
+      "correctImplementations": 3,
+      "casesPassed": 36,
+      "casesEvaluated": 48,
+      "agentSeconds": 762.743,
+      "tokens": 413447,
+      "input": 92991,
+      "output": 30664,
+      "cacheRead": 289792,
+      "incompleteUsageRecords": 0,
+      "reportedCostUSD": 0.02752902
+    },
+    "flareml": {
+      "cells": 5,
+      "completedExecutions": 4,
+      "passingTrials": 3,
+      "correctImplementations": 4,
+      "casesPassed": 52,
+      "casesEvaluated": 60,
+      "agentSeconds": 1451.3540000000003,
+      "tokens": 1940961,
+      "input": 197163,
+      "output": 56246,
+      "cacheRead": 1687552,
+      "incompleteUsageRecords": 1,
+      "reportedCostUSD": 0.06471482
+    },
+    "tla": {
+      "cells": 4,
+      "completedExecutions": 1,
+      "passingTrials": 1,
+      "correctImplementations": 3,
+      "casesPassed": 36,
+      "casesEvaluated": 36,
+      "agentSeconds": 1629.074,
+      "tokens": 2459349,
+      "input": 216242,
+      "output": 45091,
+      "cacheRead": 2198016,
+      "incompleteUsageRecords": 3,
+      "reportedCostUSD": 0.06614985999999999
+    }
+  },
+  "toolUseCountersAreHeuristic": true,
+  "status": "superseded-diagnostic",
+  "versions": {
+    "pi": "0.87.1",
+    "rust": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "go": "go version go1.25.4 darwin/arm64",
+    "bun": "1.4.2",
+    "python": "Python 3.14.3",
+    "java": "openjdk 25.0.2 2026-01-20\nOpenJDK Runtime Environment Homebrew (build 25.0.2)\nOpenJDK 64-Bit Server VM Homebrew (build 25.0.2, mixed mode, sharing)",
+    "flareml": "fml 0.5.0"
+  },
+  "model": "openai-codex/gpt-6-luna",
+  "thinking": "high",
+  "limits": {
+    "maxTokens": 600000,
+    "turnBudget": 80,
+    "chatTimeoutMs": 720000
+  },
+  "expectedCells": 24,
+  "completedCells": 13,
+  "rows": [
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "baseline",
+      "runId": "c292d240-9a23-408a-beca-fe4fb882fd7e",
+      "trialId": "c5b50a16-223f-4cdc-ac97-d4bb64d8ee9d",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "0 FlareML / 0 TLC keyword commands in baseline",
+      "agentSeconds": 203.912,
+      "totalSeconds": 207.836,
+      "tokens": 59584,
+      "input": 14575,
+      "output": 6609,
+      "cacheRead": 38400,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.005146,
+      "costIsInvoice": false,
+      "turns": 9,
+      "toolCalls": 10,
+      "flaremlCalls": 0,
+      "tlaCalls": 0,
+      "checkCalls": 0,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/c292d240-9a23-408a-beca-fe4fb882fd7e",
+      "evidence": "_evalkit-evidence/c5b50a16-223f-4cdc-ac97-d4bb64d8ee9d"
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "flareml",
+      "runId": "9500eba5-b1ae-40d3-a6c8-a9687aa88bde",
+      "trialId": "548e1997-51cf-4520-9065-43a74192e5d4",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "10 observed calls; 8 saved models; 3 complete verified reports (not implementation proofs)",
+      "agentSeconds": 278.707,
+      "totalSeconds": 282.879,
+      "tokens": 391092,
+      "input": 40908,
+      "output": 10216,
+      "cacheRead": 339968,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.012598480000000002,
+      "costIsInvoice": false,
+      "turns": 22,
+      "toolCalls": 30,
+      "flaremlCalls": 10,
+      "tlaCalls": 0,
+      "checkCalls": 8,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/9500eba5-b1ae-40d3-a6c8-a9687aa88bde",
+      "evidence": "_evalkit-evidence/548e1997-51cf-4520-9065-43a74192e5d4"
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "tla",
+      "runId": "c41335c3-a7a4-4aaa-8b0e-253b87d74ea5",
+      "trialId": "61ae1a3a-cb9c-4213-a447-377d0d4264f2",
+      "execution": "failed",
+      "passed": false,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "13 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+      "agentSeconds": 347.933,
+      "totalSeconds": 352.324,
+      "tokens": 624390,
+      "input": 56247,
+      "output": 14159,
+      "cacheRead": 553984,
+      "cacheWrite": 0,
+      "usageComplete": false,
+      "reportedCostUSD": 0.01824404,
+      "costIsInvoice": false,
+      "turns": 38,
+      "toolCalls": 42,
+      "flaremlCalls": 0,
+      "tlaCalls": 13,
+      "checkCalls": 0,
+      "stopReason": "toolUse",
+      "budgetStop": "tokens",
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": {
+        "name": "AutExecutionError",
+        "message": "Pi run failed: tokens, exit=143, settled=false",
+        "stack": "Error: Pi run failed: tokens, exit=143, settled=false\n    at catch (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/@leostera/evalkit/dist/src-DFYKSBol.mjs:729:69)\n    at effect_internal_function (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Utils.js:339:14)\n    at Sync (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:945:19)\n    at runLoop (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1142:34)\n    at evaluateEffect (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:746:27)\n    at evaluateMessageWhileSuspended (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:721:16)\n    at drainQueueOnCurrentThread (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:499:85)\n    at run (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1173:10)\n    at starveInternal (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Scheduler.js:23:15)\n    at processTicksAndRejections (native:7:39)"
+      },
+      "report": "_evalkit-results/c41335c3-a7a4-4aaa-8b0e-253b87d74ea5",
+      "evidence": "_evalkit-evidence/61ae1a3a-cb9c-4213-a447-377d0d4264f2"
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "flareml",
+      "runId": "09e3c6bc-5c87-4e51-a8bb-950e45b49193",
+      "trialId": "80f74359-62f2-4808-9c3c-5021b47bf73c",
+      "execution": "completed",
+      "passed": false,
+      "correctness": 0.3333333333333333,
+      "correctnessPassed": false,
+      "cases": {
+        "passed": 4,
+        "total": 12,
+        "failures": [
+          {
+            "name": "lag-and-stale-results/seed-1",
+            "error": "Error: invalid proposal/token",
+            "steps": 35
+          },
+          {
+            "name": "restart-primary/seed-1",
+            "error": "Error: invalid proposal/token",
+            "steps": 33
+          },
+          {
+            "name": "lag-and-stale-results/seed-17",
+            "error": "Error: invalid proposal/token",
+            "steps": 35
+          },
+          {
+            "name": "restart-primary/seed-17",
+            "error": "Error: invalid proposal/token",
+            "steps": 33
+          },
+          {
+            "name": "lag-and-stale-results/seed-1729",
+            "error": "Error: invalid proposal/token",
+            "steps": 35
+          },
+          {
+            "name": "restart-primary/seed-1729",
+            "error": "Error: invalid proposal/token",
+            "steps": 33
+          },
+          {
+            "name": "lag-and-stale-results/seed-64007",
+            "error": "Error: invalid proposal/token",
+            "steps": 35
+          },
+          {
+            "name": "restart-primary/seed-64007",
+            "error": "Error: invalid proposal/token",
+            "steps": 33
+          }
+        ]
+      },
+      "workflowPassed": true,
+      "workflow": "10 observed calls; 8 saved models; 1 complete verified reports (not implementation proofs)",
+      "agentSeconds": 322.244,
+      "totalSeconds": 322.859,
+      "tokens": 442982,
+      "input": 40745,
+      "output": 11069,
+      "cacheRead": 391168,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.013520679999999998,
+      "costIsInvoice": false,
+      "turns": 28,
+      "toolCalls": 36,
+      "flaremlCalls": 10,
+      "tlaCalls": 0,
+      "checkCalls": 8,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/09e3c6bc-5c87-4e51-a8bb-950e45b49193",
+      "evidence": "_evalkit-evidence/80f74359-62f2-4808-9c3c-5021b47bf73c"
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "tla",
+      "runId": "8800ddcb-aa6f-4978-a462-269dc09a5ea2",
+      "trialId": "a0e3c894-3307-46fd-804c-cf9dd996d62f",
+      "execution": "failed",
+      "passed": false,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "8 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+      "agentSeconds": 342.468,
+      "totalSeconds": 343.105,
+      "tokens": 623458,
+      "input": 56278,
+      "output": 13708,
+      "cacheRead": 553472,
+      "cacheWrite": 0,
+      "usageComplete": false,
+      "reportedCostUSD": 0.01801652,
+      "costIsInvoice": false,
+      "turns": 40,
+      "toolCalls": 42,
+      "flaremlCalls": 0,
+      "tlaCalls": 8,
+      "checkCalls": 0,
+      "stopReason": "toolUse",
+      "budgetStop": "tokens",
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": false,
+      "error": {
+        "name": "AutExecutionError",
+        "message": "Pi run failed: tokens, exit=143, settled=false",
+        "stack": "Error: Pi run failed: tokens, exit=143, settled=false\n    at catch (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/@leostera/evalkit/dist/src-DFYKSBol.mjs:729:69)\n    at effect_internal_function (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Utils.js:339:14)\n    at Sync (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:945:19)\n    at runLoop (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1142:34)\n    at evaluateEffect (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:746:27)\n    at evaluateMessageWhileSuspended (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:721:16)\n    at drainQueueOnCurrentThread (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:499:85)\n    at run (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1173:10)\n    at starveInternal (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Scheduler.js:23:15)\n    at processTicksAndRejections (native:7:39)"
+      },
+      "report": "_evalkit-results/8800ddcb-aa6f-4978-a462-269dc09a5ea2",
+      "evidence": "_evalkit-evidence/a0e3c894-3307-46fd-804c-cf9dd996d62f"
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "baseline",
+      "runId": "0148f9c6-1677-45eb-9b0b-b0b9a6625ac2",
+      "trialId": "ad6f8b2c-b70f-4327-9b86-f186d68c559f",
+      "execution": "completed",
+      "passed": false,
+      "correctness": 0,
+      "correctnessPassed": false,
+      "cases": {
+        "passed": 0,
+        "total": 12,
+        "failures": [
+          {
+            "name": "handover-replay/seed-1",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "lag-and-stale-results/seed-1",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "restart-primary/seed-1",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "handover-replay/seed-17",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "lag-and-stale-results/seed-17",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "restart-primary/seed-17",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "handover-replay/seed-1729",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "lag-and-stale-results/seed-1729",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "restart-primary/seed-1729",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "handover-replay/seed-64007",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "lag-and-stale-results/seed-64007",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          },
+          {
+            "name": "restart-primary/seed-64007",
+            "error": "Error: expected bounded action array",
+            "steps": 7
+          }
+        ]
+      },
+      "workflowPassed": true,
+      "workflow": "0 FlareML / 0 TLC keyword commands in baseline",
+      "agentSeconds": 168.582,
+      "totalSeconds": 169.112,
+      "tokens": 89215,
+      "input": 23857,
+      "output": 7502,
+      "cacheRead": 57856,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.006715260000000001,
+      "costIsInvoice": false,
+      "turns": 12,
+      "toolCalls": 14,
+      "flaremlCalls": 0,
+      "tlaCalls": 0,
+      "checkCalls": 0,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/0148f9c6-1677-45eb-9b0b-b0b9a6625ac2",
+      "evidence": "_evalkit-evidence/ad6f8b2c-b70f-4327-9b86-f186d68c559f"
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "tla",
+      "runId": "dd6cc6ad-4d1e-49ec-b280-0d81773abcc3",
+      "trialId": "37b89cf6-82a6-4a64-99c4-bfdcef7cd870",
+      "execution": "failed",
+      "passed": false,
+      "correctness": 0,
+      "correctnessPassed": false,
+      "cases": {
+        "buildExit": 1,
+        "stderr": "error: ModuleNotFound resolving \"./main.ts\" (entry point)\n"
+      },
+      "workflowPassed": true,
+      "workflow": "15 recorded TLC invocations; 1 completed checks with declared invariants (not proof adequacy)",
+      "agentSeconds": 358.761,
+      "totalSeconds": 358.812,
+      "tokens": 619840,
+      "input": 56018,
+      "output": 6766,
+      "cacheRead": 557056,
+      "cacheWrite": 0,
+      "usageComplete": false,
+      "reportedCostUSD": 0.01455536,
+      "costIsInvoice": false,
+      "turns": 44,
+      "toolCalls": 46,
+      "flaremlCalls": 0,
+      "tlaCalls": 16,
+      "checkCalls": 0,
+      "stopReason": "toolUse",
+      "budgetStop": "tokens",
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": false,
+      "error": {
+        "name": "AutExecutionError",
+        "message": "Pi run failed: tokens, exit=143, settled=false",
+        "stack": "Error: Pi run failed: tokens, exit=143, settled=false\n    at catch (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/@leostera/evalkit/dist/src-DFYKSBol.mjs:729:69)\n    at effect_internal_function (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Utils.js:339:14)\n    at Sync (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:945:19)\n    at runLoop (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1142:34)\n    at evaluateEffect (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:746:27)\n    at evaluateMessageWhileSuspended (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:721:16)\n    at drainQueueOnCurrentThread (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:499:85)\n    at run (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1173:10)\n    at starveInternal (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Scheduler.js:23:15)\n    at processTicksAndRejections (native:7:39)"
+      },
+      "report": "_evalkit-results/dd6cc6ad-4d1e-49ec-b280-0d81773abcc3",
+      "evidence": "_evalkit-evidence/37b89cf6-82a6-4a64-99c4-bfdcef7cd870"
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "baseline",
+      "runId": "dbb476b0-e0ce-4d20-8198-d9caaea79be1",
+      "trialId": "e5dbf2b4-37c1-42c6-95f2-3cb871a174f9",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "0 FlareML / 0 TLC keyword commands in baseline",
+      "agentSeconds": 215.322,
+      "totalSeconds": 216.053,
+      "tokens": 176846,
+      "input": 35470,
+      "output": 8768,
+      "cacheRead": 132608,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.009257079999999999,
+      "costIsInvoice": false,
+      "turns": 20,
+      "toolCalls": 19,
+      "flaremlCalls": 0,
+      "tlaCalls": 0,
+      "checkCalls": 0,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/dbb476b0-e0ce-4d20-8198-d9caaea79be1",
+      "evidence": "_evalkit-evidence/e5dbf2b4-37c1-42c6-95f2-3cb871a174f9"
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "flareml",
+      "runId": "f6e87759-62e7-4726-ba40-2b0f0335c22c",
+      "trialId": "d81a9e41-0fb1-4484-8d42-f680844c1f45",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "7 observed calls; 6 saved models; 4 complete verified reports (not implementation proofs)",
+      "agentSeconds": 264.812,
+      "totalSeconds": 265.299,
+      "tokens": 263593,
+      "input": 32917,
+      "output": 10004,
+      "cacheRead": 220672,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.01050042,
+      "costIsInvoice": false,
+      "turns": 17,
+      "toolCalls": 24,
+      "flaremlCalls": 7,
+      "tlaCalls": 0,
+      "checkCalls": 5,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/f6e87759-62e7-4726-ba40-2b0f0335c22c",
+      "evidence": "_evalkit-evidence/d81a9e41-0fb1-4484-8d42-f680844c1f45"
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "baseline",
+      "runId": "13d400c3-7e7b-49b8-baab-a3989354a3e8",
+      "trialId": "ca12a7e0-2691-46fb-b2f1-9e81c74b5afb",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "0 FlareML / 0 TLC keyword commands in baseline",
+      "agentSeconds": 174.927,
+      "totalSeconds": 175.667,
+      "tokens": 87802,
+      "input": 19089,
+      "output": 7785,
+      "cacheRead": 60928,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.00641068,
+      "costIsInvoice": false,
+      "turns": 11,
+      "toolCalls": 11,
+      "flaremlCalls": 0,
+      "tlaCalls": 0,
+      "checkCalls": 0,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/13d400c3-7e7b-49b8-baab-a3989354a3e8",
+      "evidence": "_evalkit-evidence/ca12a7e0-2691-46fb-b2f1-9e81c74b5afb"
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "flareml",
+      "runId": "0d32c9bf-eca8-49bd-84ca-8e16f4cfe2f2",
+      "trialId": "42457542-c6f6-48a2-8b17-9ac1deab9b26",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "7 observed calls; 4 saved models; 3 complete verified reports (not implementation proofs)",
+      "agentSeconds": 215.539,
+      "totalSeconds": 216.492,
+      "tokens": 215611,
+      "input": 33458,
+      "output": 9097,
+      "cacheRead": 173056,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.00962486,
+      "costIsInvoice": false,
+      "turns": 15,
+      "toolCalls": 20,
+      "flaremlCalls": 7,
+      "tlaCalls": 0,
+      "checkCalls": 4,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/0d32c9bf-eca8-49bd-84ca-8e16f4cfe2f2",
+      "evidence": "_evalkit-evidence/42457542-c6f6-48a2-8b17-9ac1deab9b26"
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "tla",
+      "runId": "bd371ad9-95eb-4a60-83d6-47169e66f829",
+      "trialId": "db2de38e-9267-4a7f-8dd4-833557cd8764",
+      "execution": "completed",
+      "passed": true,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "12 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+      "agentSeconds": 579.912,
+      "totalSeconds": 580.673,
+      "tokens": 591661,
+      "input": 47699,
+      "output": 10458,
+      "cacheRead": 533504,
+      "cacheWrite": 0,
+      "usageComplete": true,
+      "reportedCostUSD": 0.015333939999999996,
+      "costIsInvoice": false,
+      "turns": 38,
+      "toolCalls": 43,
+      "flaremlCalls": 0,
+      "tlaCalls": 12,
+      "checkCalls": 0,
+      "stopReason": "stop",
+      "budgetStop": null,
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": null,
+      "report": "_evalkit-results/bd371ad9-95eb-4a60-83d6-47169e66f829",
+      "evidence": "_evalkit-evidence/db2de38e-9267-4a7f-8dd4-833557cd8764"
+    },
+    {
+      "eval": "manifest-publication-rust",
+      "mode": "flareml",
+      "runId": "27da319c-678e-4467-b1f2-44a37dcfac90",
+      "trialId": "db57ba4e-0483-4142-b744-d81cd765f3a7",
+      "execution": "failed",
+      "passed": false,
+      "correctness": 1,
+      "correctnessPassed": true,
+      "cases": {
+        "passed": 12,
+        "total": 12,
+        "failures": []
+      },
+      "workflowPassed": true,
+      "workflow": "11 observed calls; 9 saved models; 4 complete verified reports (not implementation proofs)",
+      "agentSeconds": 370.052,
+      "totalSeconds": 374.067,
+      "tokens": 627683,
+      "input": 49135,
+      "output": 15860,
+      "cacheRead": 562688,
+      "cacheWrite": 0,
+      "usageComplete": false,
+      "reportedCostUSD": 0.01847038,
+      "costIsInvoice": false,
+      "turns": 31,
+      "toolCalls": 40,
+      "flaremlCalls": 11,
+      "tlaCalls": 0,
+      "checkCalls": 9,
+      "stopReason": "toolUse",
+      "budgetStop": "tokens",
+      "models": [
+        "openai-codex/gpt-6-luna"
+      ],
+      "hasDesign": true,
+      "error": {
+        "name": "AutExecutionError",
+        "message": "Pi run failed: tokens, exit=143, settled=false",
+        "stack": "Error: Pi run failed: tokens, exit=143, settled=false\n    at catch (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/@leostera/evalkit/dist/src-DFYKSBol.mjs:729:69)\n    at effect_internal_function (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Utils.js:339:14)\n    at Sync (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:945:19)\n    at runLoop (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1142:34)\n    at evaluateEffect (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:746:27)\n    at evaluateMessageWhileSuspended (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:721:16)\n    at drainQueueOnCurrentThread (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:499:85)\n    at run (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/internal/fiberRuntime.js:1173:10)\n    at starveInternal (/Users/leostera/Developer/github.com/leostera/flareml/evals/node_modules/effect/dist/esm/Scheduler.js:23:15)\n    at processTicksAndRejections (native:7:39)"
+      },
+      "report": "_evalkit-results/27da319c-678e-4467-b1f2-44a37dcfac90",
+      "evidence": "_evalkit-evidence/db57ba4e-0483-4142-b744-d81cd765f3a7"
+    }
+  ],
+  "pairs": [
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "flareml",
+      "baselineCorrect": 1,
+      "assistedCorrect": 1,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 331508,
+      "tokenRatio": 6.563708378088077,
+      "agentSecondsDifference": 74.79499999999999,
+      "agentTimeRatio": 1.3668003844795793
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "tla",
+      "baselineCorrect": 1,
+      "assistedCorrect": 1,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 564806,
+      "tokenRatio": 10.479155477980665,
+      "agentSecondsDifference": 144.021,
+      "agentTimeRatio": 1.7062899682215857
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "flareml",
+      "baselineCorrect": 0,
+      "assistedCorrect": 0.3333333333333333,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 353767,
+      "tokenRatio": 4.9653309421061484,
+      "agentSecondsDifference": 153.66200000000003,
+      "agentTimeRatio": 1.9114970756071232
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "tla",
+      "baselineCorrect": 0,
+      "assistedCorrect": 1,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 534243,
+      "tokenRatio": 6.988264305329821,
+      "agentSecondsDifference": 173.88600000000002,
+      "agentTimeRatio": 2.031462433711784
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "flareml",
+      "baselineCorrect": 1,
+      "assistedCorrect": 1,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 86747,
+      "tokenRatio": 1.490522827771055,
+      "agentSecondsDifference": 49.49000000000001,
+      "agentTimeRatio": 1.2298418183000344
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "tla",
+      "baselineCorrect": 1,
+      "assistedCorrect": 0,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 442994,
+      "tokenRatio": 3.504970426246565,
+      "agentSecondsDifference": 143.43900000000002,
+      "agentTimeRatio": 1.6661604480731185
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "flareml",
+      "baselineCorrect": 1,
+      "assistedCorrect": 1,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 127809,
+      "tokenRatio": 2.455650212979203,
+      "agentSecondsDifference": 40.611999999999995,
+      "agentTimeRatio": 1.232165417574188
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "tla",
+      "baselineCorrect": 1,
+      "assistedCorrect": 1,
+      "baselineWorkflow": true,
+      "assistedWorkflow": true,
+      "tokenDifference": 503859,
+      "tokenRatio": 6.738582264640897,
+      "agentSecondsDifference": 404.985,
+      "agentTimeRatio": 3.315165754857741
+    }
+  ],
+  "limitations": [
+    "One trial per cell: descriptive pilot, not a statistically supported treatment effect.",
+    "Controlled storage/log services and asynchronous delivery between real processes; not a deployed network benchmark. See the task-specific clock and durability assumptions.",
+    "Local Pi filesystem boundaries are instructions/directories, not an adversarial security sandbox.",
+    "Caches and sequential execution order affect time/cost; treatment order is rotated.",
+    "Provider usage includes reported cache tokens and reasoning inside output. A zero reported price is unavailable pricing, not free compute.",
+    "Mode adherence is a smoke gate: shell-command keyword counts and saved complete reports, not exec tracing or proof adequacy. Supplemental model reruns and manual review are separate.",
+    "Cases share a specification across languages; performance of the generated service is not benchmarked."
+  ]
+}

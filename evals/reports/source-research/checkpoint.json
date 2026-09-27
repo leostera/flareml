@@ -1,0 +1,55 @@
+{
+  "kind": "upstream-source-diagnostic-not-agent-evaluation",
+  "source": "https://github.com/tlaplus/Examples/tree/c9e45d0e4695a8552d31105b93dff21456b7be69/specifications/CheckpointCoordination",
+  "revision": "c9e45d0e4695a8552d31105b93dff21456b7be69",
+  "license": "MIT; original license retained with diagnostic sources",
+  "sourceHashes": {
+    "CheckpointCoordination.tla": "c69fbc8bd2b05373edf0bfb76fa00ab1cd980bf5fbd81c4fc1361e3c99199964",
+    "MCCheckpointCoordination.tla": "b8ec0a17e4a3558e11635b4958872d2d3d02847ffe79a0a592fbc61fb6b10d4c",
+    "MCCheckpointCoordination.cfg": "4fa3ed90387d2aa93b98d7423ac365ad22b85da109004bda9819135bcb35d5bf",
+    "MCCheckpointCoordinationFailure.cfg": "6027131ece0b948438c64b766eafbd88444c51486a074ad6e64b8eab8d98178e",
+    "README.md": "5850af5c4e5a7623f28c9c1b05d7f00da9f2d6edfdc76b16ac7bab0a437841f0"
+  },
+  "tlc": {
+    "release": "1.7.4",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+  },
+  "scope": {
+    "nodes": 3,
+    "majority": 2,
+    "maxLog": 3,
+    "maxNat": 5,
+    "constraint": "OpenIndices /= {}",
+    "symmetry": "NodeSymmetry",
+    "heapMiB": 768,
+    "workers": 1,
+    "timeoutSeconds": 120
+  },
+  "limitations": [
+    "Uses upstream bounded configurations, including state constraints and symmetry.",
+    "Safety reproduction, not a liveness proof or a new discovery.",
+    "No coding agent participated; neither original source nor known solution is a candidate fixture."
+  ],
+  "rows": [
+    {
+      "variant": "buggy",
+      "exitCode": 12,
+      "verified": false,
+      "violation": "SafetyInvariant",
+      "durationMs": 12302,
+      "generated": 1302999,
+      "distinct": 88152,
+      "evidence": "/Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/source-research/checkpoint-1790495187870/buggy"
+    },
+    {
+      "variant": "fixed",
+      "exitCode": null,
+      "verified": false,
+      "violation": null,
+      "durationMs": 120017,
+      "generated": null,
+      "distinct": null,
+      "evidence": "/Users/leostera/Developer/github.com/leostera/flareml/evals/_evalkit-evidence/source-research/checkpoint-1790495187870/fixed"
+    }
+  ]
+}

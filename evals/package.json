@@ -1,0 +1,18 @@
+{
+  "name": "flareml-evals",
+  "type": "module",
+  "private": true,
+  "packageManager": "bun@1.4.2",
+  "devDependencies": {"@types/bun": "1.3.10", "typescript": "5.9.3"},
+  "dependencies": {"@leostera/evalkit": "https://github.com/leostera/evalkit", "effect": "3.22.2"},
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test ./tests",
+    "evals": "evalkit run-matrix flareml-impact --local --concurrency 1",
+    "matrix": "evalkit run-matrix flareml-impact --local --concurrency 1",
+    "matrix:plan": "evalkit run-matrix flareml-impact --dry-run",
+    "campaign": "bun scripts/campaign.ts",
+    "summarize": "bun scripts/summarize.ts",
+    "dashboard": "evalkit serve-dashboard"
+  }
+}

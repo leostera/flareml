@@ -1,0 +1,970 @@
+{
+  "review": "Partial primary recovery and completed-lease replay; deadline/finish ties count as completion.",
+  "note": "Supplemental EvalKit regrade of unchanged artifacts, not new agent trials. Original reports are unchanged; no provider calls or repairs.",
+  "records": [
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "baseline",
+      "originalTrialId": "c5b50a16-223f-4cdc-ac97-d4bb64d8ee9d",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 3908,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "30f7dd34-4170-49e5-99c3-01419ffa640c",
+        "runUri": "evalkit:run:30f7dd34-4170-49e5-99c3-01419ffa640c",
+        "trialId": "b8636762-6d66-4954-a1a6-11c2ad61405b",
+        "trialUri": "evalkit:trial:b8636762-6d66-4954-a1a6-11c2ad61405b",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-rust-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/30f7dd34-4170-49e5-99c3-01419ffa640c",
+        "durationMs": 5659,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 5644,
+              "value": 0.5,
+              "passed": false,
+              "explanation": "4/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 4,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: overlapping checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0.5,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "flareml",
+      "originalTrialId": "548e1997-51cf-4520-9065-43a74192e5d4",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 4148,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 2,
+            "value": 1,
+            "passed": true,
+            "explanation": "10 observed calls; 8 saved models; 3 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 10,
+              "models": 8,
+              "verified": 3
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "72be3b57-aba0-49f9-a374-b24825c0cc21",
+        "runUri": "evalkit:run:72be3b57-aba0-49f9-a374-b24825c0cc21",
+        "trialId": "e5644ee6-5586-46ca-879c-bf67bdb1de36",
+        "trialUri": "evalkit:trial:e5644ee6-5586-46ca-879c-bf67bdb1de36",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-rust-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/72be3b57-aba0-49f9-a374-b24825c0cc21",
+        "durationMs": 4085,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 4052,
+              "value": 1,
+              "passed": true,
+              "explanation": "8/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 8,
+                "total": 8,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-rust",
+      "mode": "tla",
+      "originalTrialId": "61ae1a3a-cb9c-4213-a447-377d0d4264f2",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 4338,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 0,
+            "value": 1,
+            "passed": true,
+            "explanation": "13 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 13,
+              "verified": 2
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "2a2d7087-50b9-4516-9a1e-715a941cf0b1",
+        "runUri": "evalkit:run:2a2d7087-50b9-4516-9a1e-715a941cf0b1",
+        "trialId": "8013d162-f1eb-4885-b675-b8bdc5818b97",
+        "trialUri": "evalkit:trial:8013d162-f1eb-4885-b675-b8bdc5818b97",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-rust-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/2a2d7087-50b9-4516-9a1e-715a941cf0b1",
+        "durationMs": 4239,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 4191,
+              "value": 1,
+              "passed": true,
+              "explanation": "8/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 8,
+                "total": 8,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "flareml",
+      "originalTrialId": "80f74359-62f2-4808-9c3c-5021b47bf73c",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 592,
+            "value": 0.3333333333333333,
+            "passed": false,
+            "explanation": "4/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 4,
+              "total": 12,
+              "failures": [
+                {
+                  "name": "lag-and-stale-results/seed-1",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-1",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                },
+                {
+                  "name": "lag-and-stale-results/seed-17",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-17",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                },
+                {
+                  "name": "lag-and-stale-results/seed-1729",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-1729",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                },
+                {
+                  "name": "lag-and-stale-results/seed-64007",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 35
+                },
+                {
+                  "name": "restart-primary/seed-64007",
+                  "error": "Error: invalid proposal/token",
+                  "steps": 33
+                }
+              ]
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 4,
+            "value": 1,
+            "passed": true,
+            "explanation": "10 observed calls; 8 saved models; 1 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 10,
+              "models": 8,
+              "verified": 1
+            }
+          }
+        ],
+        "overall": 0.6666666666666666,
+        "passed": false
+      },
+      "review": {
+        "runId": "6d529920-b9e0-4644-a235-2b39fae292ce",
+        "runUri": "evalkit:run:6d529920-b9e0-4644-a235-2b39fae292ce",
+        "trialId": "965f8178-286e-4594-a4fb-f1cbc2212aa9",
+        "trialUri": "evalkit:trial:965f8178-286e-4594-a4fb-f1cbc2212aa9",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-go-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/6d529920-b9e0-4644-a235-2b39fae292ce",
+        "durationMs": 834,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 807,
+              "value": 0.5,
+              "passed": false,
+              "explanation": "4/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 4,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: overlapping checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0.5,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "tla",
+      "originalTrialId": "a0e3c894-3307-46fd-804c-cf9dd996d62f",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 619,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "8 recorded TLC invocations; 2 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 8,
+              "verified": 2
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "e48d701b-19ca-47df-9127-b0fc3edc3859",
+        "runUri": "evalkit:run:e48d701b-19ca-47df-9127-b0fc3edc3859",
+        "trialId": "1dafc6d2-8a31-4811-af2a-457db4687a42",
+        "trialUri": "evalkit:trial:1dafc6d2-8a31-4811-af2a-457db4687a42",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-go-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/e48d701b-19ca-47df-9127-b0fc3edc3859",
+        "durationMs": 597,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 564,
+              "value": 0.5,
+              "passed": false,
+              "explanation": "4/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 4,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: overlapping checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0.5,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-go",
+      "mode": "baseline",
+      "originalTrialId": "ad6f8b2c-b70f-4327-9b86-f186d68c559f",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 521,
+            "value": 0,
+            "passed": false,
+            "explanation": "0/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 0,
+              "total": 12,
+              "failures": [
+                {
+                  "name": "handover-replay/seed-1",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-1",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-1",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "handover-replay/seed-17",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-17",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-17",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "handover-replay/seed-1729",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-1729",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-1729",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "handover-replay/seed-64007",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "lag-and-stale-results/seed-64007",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                },
+                {
+                  "name": "restart-primary/seed-64007",
+                  "error": "Error: expected bounded action array",
+                  "steps": 7
+                }
+              ]
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 0,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 0.5,
+        "passed": false
+      },
+      "review": {
+        "runId": "90722382-599f-4ecc-8440-38e1585756d1",
+        "runUri": "evalkit:run:90722382-599f-4ecc-8440-38e1585756d1",
+        "trialId": "e9329496-f86c-4e77-8199-84750d575e60",
+        "trialUri": "evalkit:trial:e9329496-f86c-4e77-8199-84750d575e60",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-go-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/90722382-599f-4ecc-8440-38e1585756d1",
+        "durationMs": 535,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 527,
+              "value": 0,
+              "passed": false,
+              "explanation": "0/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 0,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "completed-replay/seed-1",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "completed-replay/seed-17",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "completed-replay/seed-1729",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: expected bounded action array"
+                  },
+                  {
+                    "name": "completed-replay/seed-64007",
+                    "error": "Error: expected bounded action array"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "tla",
+      "originalTrialId": "37b89cf6-82a6-4a64-99c4-bfdcef7cd870",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 16,
+            "value": 0,
+            "passed": false,
+            "explanation": "Candidate build failed",
+            "evidence": {
+              "buildExit": 1,
+              "stderr": "error: ModuleNotFound resolving \"./main.ts\" (entry point)\n"
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "15 recorded TLC invocations; 1 completed checks with declared invariants (not proof adequacy)",
+            "evidence": {
+              "invocations": 15,
+              "verified": 1
+            }
+          }
+        ],
+        "overall": 0.5,
+        "passed": false
+      },
+      "review": {
+        "runId": "48e84737-75d6-406c-89ba-3d7f955761f9",
+        "runUri": "evalkit:run:48e84737-75d6-406c-89ba-3d7f955761f9",
+        "trialId": "cd94d235-bcf2-4d28-a136-ad3eb459dacc",
+        "trialUri": "evalkit:trial:cd94d235-bcf2-4d28-a136-ad3eb459dacc",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-typescript-tla",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/48e84737-75d6-406c-89ba-3d7f955761f9",
+        "durationMs": 58,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 10,
+              "value": 0,
+              "passed": false,
+              "explanation": "Frozen candidate build failed",
+              "evidence": {
+                "stderr": "error: ModuleNotFound resolving \"./main.ts\" (entry point)\n"
+              }
+            }
+          ],
+          "overall": 0,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "baseline",
+      "originalTrialId": "e5dbf2b4-37c1-42c6-95f2-3cb871a174f9",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 725,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "6ecb75fa-b5aa-4afe-a87f-e37a21e2722c",
+        "runUri": "evalkit:run:6ecb75fa-b5aa-4afe-a87f-e37a21e2722c",
+        "trialId": "fa238aa1-c3d6-4f1e-983f-3cd29b22b038",
+        "trialUri": "evalkit:trial:fa238aa1-c3d6-4f1e-983f-3cd29b22b038",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-typescript-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/6ecb75fa-b5aa-4afe-a87f-e37a21e2722c",
+        "durationMs": 456,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 449,
+              "value": 0.5,
+              "passed": false,
+              "explanation": "4/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 4,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: overlapping checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0.5,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-typescript",
+      "mode": "flareml",
+      "originalTrialId": "d81a9e41-0fb1-4484-8d42-f680844c1f45",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 467,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 3,
+            "value": 1,
+            "passed": true,
+            "explanation": "7 observed calls; 6 saved models; 4 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 7,
+              "models": 6,
+              "verified": 4
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "3bb0b158-aff0-4fd1-ab9d-ab1a5c23f147",
+        "runUri": "evalkit:run:3bb0b158-aff0-4fd1-ab9d-ab1a5c23f147",
+        "trialId": "f0a56cc0-6455-4361-8410-47a718c0be96",
+        "trialUri": "evalkit:trial:f0a56cc0-6455-4361-8410-47a718c0be96",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-typescript-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/3bb0b158-aff0-4fd1-ab9d-ab1a5c23f147",
+        "durationMs": 341,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 315,
+              "value": 0.5,
+              "passed": false,
+              "explanation": "4/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 4,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: overlapping checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0.5,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "baseline",
+      "originalTrialId": "ca12a7e0-2691-46fb-b2f1-9e81c74b5afb",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 732,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "0 FlareML / 0 TLC keyword commands in baseline",
+            "evidence": {
+              "flaremlCalls": 0,
+              "tlaCalls": 0
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "da9560c0-3b9c-4f0d-84ff-01c014fdadb4",
+        "runUri": "evalkit:run:da9560c0-3b9c-4f0d-84ff-01c014fdadb4",
+        "trialId": "6f57753a-7a06-402f-afeb-a8070509fd5b",
+        "trialUri": "evalkit:trial:6f57753a-7a06-402f-afeb-a8070509fd5b",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-python-baseline",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/da9560c0-3b9c-4f0d-84ff-01c014fdadb4",
+        "durationMs": 503,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 498,
+              "value": 0.5,
+              "passed": false,
+              "explanation": "4/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 4,
+                "total": 8,
+                "failures": [
+                  {
+                    "name": "recovery-backlog/seed-1",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-17",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-1729",
+                    "error": "Error: overlapping checkpoints"
+                  },
+                  {
+                    "name": "recovery-backlog/seed-64007",
+                    "error": "Error: overlapping checkpoints"
+                  }
+                ]
+              }
+            }
+          ],
+          "overall": 0.5,
+          "passed": false
+        }
+      }
+    },
+    {
+      "eval": "checkpoint-coordination-python",
+      "mode": "flareml",
+      "originalTrialId": "42457542-c6f6-48a2-8b17-9ac1deab9b26",
+      "originalScoring": {
+        "results": [
+          {
+            "name": "independent distributed safety and progress",
+            "kind": "predicate",
+            "durationMs": 939,
+            "value": 1,
+            "passed": true,
+            "explanation": "12/12 distributed safety/progress schedules passed",
+            "evidence": {
+              "passed": 12,
+              "total": 12,
+              "failures": []
+            }
+          },
+          {
+            "name": "assigned workflow observed",
+            "kind": "predicate",
+            "durationMs": 1,
+            "value": 1,
+            "passed": true,
+            "explanation": "7 observed calls; 4 saved models; 3 complete verified reports (not implementation proofs)",
+            "evidence": {
+              "calls": 7,
+              "models": 4,
+              "verified": 3
+            }
+          }
+        ],
+        "overall": 1,
+        "passed": true
+      },
+      "review": {
+        "runId": "09a496a8-c8f9-4e6c-817e-7dbfd110fec9",
+        "runUri": "evalkit:run:09a496a8-c8f9-4e6c-817e-7dbfd110fec9",
+        "trialId": "b1971930-2959-4909-9ee0-286a3b19751b",
+        "trialUri": "evalkit:trial:b1971930-2959-4909-9ee0-286a3b19751b",
+        "trialIndex": 0,
+        "evalId": "review-recovery-checkpoint-coordination-python-flareml",
+        "status": "completed",
+        "reportLocation": "_evalkit-results/09a496a8-c8f9-4e6c-817e-7dbfd110fec9",
+        "durationMs": 674,
+        "scoring": {
+          "results": [
+            {
+              "name": "supplemental distributed corpus",
+              "kind": "predicate",
+              "durationMs": 652,
+              "value": 1,
+              "passed": true,
+              "explanation": "8/8 reviewed distributed schedules passed",
+              "evidence": {
+                "passed": 8,
+                "total": 8,
+                "failures": []
+              }
+            }
+          ],
+          "overall": 1,
+          "passed": true
+        }
+      }
+    }
+  ]
+}
